@@ -5,6 +5,14 @@
 //! (stats, effort) reuse existing families so every theme stays coherent:
 //! stats renders with the cost fg on the context bg, effort with the model
 //! colors.
+//!
+//! A custom theme is a directory containing a `theme.yaml` with any subset
+//! of the six families below (each an optional `fg`/`bg` hex pair); anything
+//! left unspecified falls back to the catppuccin-mocha value for that slot.
+
+use std::path::Path;
+
+use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb {
@@ -20,6 +28,19 @@ impl Rgb {
             g: (value >> 8) as u8,
             b: value as u8,
         }
+    }
+
+    /// Parses a `#rrggbb` or `rrggbb` hex color string.
+    pub fn parse_hex(value: &str) -> Result<Self, String> {
+        let digits = value.strip_prefix('#').unwrap_or(value);
+        if digits.len() != 6 {
+            return Err(format!(
+                "invalid color '{value}': expected 6 hex digits (e.g. '#d97757')"
+            ));
+        }
+        u32::from_str_radix(digits, 16)
+            .map(Self::hex)
+            .map_err(|_| format!("invalid color '{value}': not a valid hex value"))
     }
 }
 
@@ -111,25 +132,68 @@ const PALETTES: &[Palette] = &[
     },
 ];
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Default)]
+struct RawFamily {
+    fg: Option<String>,
+    bg: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawTheme {
+    name: Option<String>,
+    claude: Option<RawFamily>,
+    directory: Option<RawFamily>,
+    git: Option<RawFamily>,
+    model: Option<RawFamily>,
+    context: Option<RawFamily>,
+    cost: Option<RawFamily>,
+}
+
+/// A fully resolved theme: owned so it can come from either a vendored
+/// preset or a loaded custom `theme.yaml`.
+#[derive(Debug, Clone)]
 pub struct Theme {
-    palette: &'static Palette,
+    name: String,
+    claude: SegmentColors,
+    directory: SegmentColors,
+    git: SegmentColors,
+    model: SegmentColors,
+    context: SegmentColors,
+    cost: SegmentColors,
 }
 
 impl Default for Theme {
     fn default() -> Self {
-        Self {
-            palette: &PALETTES[0],
-        }
+        Self::from_preset(&PALETTES[0])
     }
 }
 
 impl Theme {
+    fn from_preset(preset: &Palette) -> Self {
+        let colors = |pair: (u32, u32)| SegmentColors {
+            fg: Rgb::hex(pair.0),
+            bg: Rgb::hex(pair.1),
+        };
+        Self {
+            name: preset.name.to_string(),
+            claude: colors(preset.claude),
+            directory: colors(preset.directory),
+            git: colors(preset.git),
+            model: colors(preset.model),
+            context: colors(preset.context),
+            cost: colors(preset.cost),
+        }
+    }
+
     pub fn by_name(name: &str) -> Result<Self, String> {
+        let path = Path::new(name);
+        if path.is_dir() {
+            return Self::from_dir(path);
+        }
         PALETTES
             .iter()
             .find(|palette| palette.name == name)
-            .map(|palette| Self { palette })
+            .map(Self::from_preset)
             .ok_or_else(|| {
                 let available: Vec<&str> = PALETTES.iter().map(|p| p.name).collect();
                 format!(
@@ -139,24 +203,63 @@ impl Theme {
             })
     }
 
-    pub fn name(&self) -> &'static str {
-        self.palette.name
+    fn from_dir(dir: &Path) -> Result<Self, String> {
+        let yaml_path = dir.join("theme.yaml");
+        let contents = std::fs::read_to_string(&yaml_path)
+            .map_err(|e| format!("failed to read '{}': {e}", yaml_path.display()))?;
+        let raw: RawTheme = serde_norway::from_str(&contents)
+            .map_err(|e| format!("failed to parse '{}': {e}", yaml_path.display()))?;
+
+        let defaults = &PALETTES[0];
+        let resolve =
+            |default: (u32, u32), family: Option<RawFamily>| -> Result<SegmentColors, String> {
+                let (default_fg, default_bg) = default;
+                let family = family.unwrap_or_default();
+                let fg = match family.fg {
+                    Some(s) => Rgb::parse_hex(&s)?,
+                    None => Rgb::hex(default_fg),
+                };
+                let bg = match family.bg {
+                    Some(s) => Rgb::parse_hex(&s)?,
+                    None => Rgb::hex(default_bg),
+                };
+                Ok(SegmentColors { fg, bg })
+            };
+
+        let name = raw.name.unwrap_or_else(|| {
+            dir.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "custom".to_string())
+        });
+
+        Ok(Self {
+            name,
+            claude: resolve(defaults.claude, raw.claude)?,
+            directory: resolve(defaults.directory, raw.directory)?,
+            git: resolve(defaults.git, raw.git)?,
+            model: resolve(defaults.model, raw.model)?,
+            context: resolve(defaults.context, raw.context)?,
+            cost: resolve(defaults.cost, raw.cost)?,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn colors(&self, kind: SegmentKind) -> SegmentColors {
-        let (fg, bg) = match kind {
-            SegmentKind::Logo => self.palette.claude,
-            SegmentKind::Dir => self.palette.directory,
-            SegmentKind::Git => self.palette.git,
-            SegmentKind::Model => self.palette.model,
-            SegmentKind::Context => self.palette.context,
-            SegmentKind::Cost => self.palette.cost,
-            SegmentKind::Stats => (self.palette.cost.0, self.palette.context.1),
-            SegmentKind::Effort => self.palette.model,
-        };
-        SegmentColors {
-            fg: Rgb::hex(fg),
-            bg: Rgb::hex(bg),
+        match kind {
+            SegmentKind::Logo => self.claude,
+            SegmentKind::Dir => self.directory,
+            SegmentKind::Git => self.git,
+            SegmentKind::Model => self.model,
+            SegmentKind::Context => self.context,
+            SegmentKind::Cost => self.cost,
+            SegmentKind::Stats => SegmentColors {
+                fg: self.cost.fg,
+                bg: self.context.bg,
+            },
+            SegmentKind::Effort => self.model,
         }
     }
 }

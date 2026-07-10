@@ -63,10 +63,41 @@ Flags go on that command string:
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--modules` | `logo,dir,git,model,context,cost,stats,effort` | Segments to render, in order |
-| `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight` |
+| `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, or a path to a [custom theme directory](#custom-themes) |
 | `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain Unicode), `flat` (none) |
 | `--no-progress` | off | Suppress the OSC 9;4 terminal progress bar |
 | `--width` | `$COLUMNS`, then parent TTY, then 200 | Terminal width (drives dir truncation) |
+
+## Custom themes
+
+`--theme` accepts a filesystem path instead of a built-in name. When the value
+resolves to an existing directory, powerline-claude reads `theme.yaml` from
+inside it instead of looking up a vendored palette:
+
+```bash
+powerline-claude --theme ~/.config/powerline-claude/themes/my-theme
+# reads ~/.config/powerline-claude/themes/my-theme/theme.yaml
+```
+
+`theme.yaml` defines fg/bg hex colors for the six segment families
+(`claude`, `directory`, `git`, `model`, `context`, `cost`) plus an optional
+display `name`:
+
+```yaml
+name: my-theme
+claude: { fg: "#d97757", bg: "#313244" }
+directory: { fg: "#89dceb", bg: "#1e1e2e" }
+git: { fg: "#eba0ac", bg: "#313244" }
+model: { fg: "#b4befe", bg: "#1e1e2e" }
+context: { fg: "#fab387", bg: "#313244" }
+cost: { fg: "#a6e3a1", bg: "#45475a" }
+```
+
+Every field is optional, right down to individual `fg`/`bg` values within a
+family — anything left unspecified falls back to the corresponding
+catppuccin-mocha color. `name` defaults to the directory's basename if
+omitted. `stats` and `effort` aren't configurable directly; they derive from
+`cost`/`context` and `model` respectively, same as the built-in palettes.
 
 ## Segments
 
