@@ -2,7 +2,9 @@
 
 A powerline-style status line for [Claude Code](https://code.claude.com), as a
 single Rust binary. Reads the statusline JSON Claude Code writes to stdin,
-prints an ANSI bar. No starship, no jq, no subprocesses on the hot path.
+prints an ANSI bar.
+
+![the status line, default catppuccin-mocha theme](docs/statusline.png)
 
 Inspired by [starship-claude](https://github.com/martinemde/starship-claude),
 using a [powerline-go](https://github.com/justjanne/powerline-go)-style API.
