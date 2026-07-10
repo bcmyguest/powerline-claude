@@ -1,5 +1,10 @@
 # powerline-claude
 
+[![CI](https://github.com/bcmyguest/powerline-claude/actions/workflows/ci.yml/badge.svg)](https://github.com/bcmyguest/powerline-claude/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/powerline-claude.svg)](https://crates.io/crates/powerline-claude)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-d97757.svg)](https://docs.claude.com/en/docs/claude-code)
+
 A powerline-style status line for [Claude Code](https://code.claude.com), as a
 single Rust binary. Reads the statusline JSON Claude Code writes to stdin,
 prints an ANSI bar.
@@ -36,6 +41,12 @@ Grab the static binary from the latest release:
 curl -fsSL -o ~/.local/bin/powerline-claude \
   https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-x86_64-unknown-linux-musl
 chmod +x ~/.local/bin/powerline-claude
+```
+
+or install from [crates.io](https://crates.io/crates/powerline-claude):
+
+```bash
+cargo install powerline-claude --locked
 ```
 
 or build from source:
@@ -81,17 +92,20 @@ powerline-claude --theme ~/.config/powerline-claude/themes/my-theme
 
 `theme.yaml` defines fg/bg hex colors for the six segment families
 (`claude`, `directory`, `git`, `model`, `context`, `cost`) plus an optional
-display `name`:
+display `name`. [`docs/themes/synthwave`](docs/themes/synthwave/theme.yaml)
+is a complete example you can copy as a starting point:
 
 ```yaml
-name: my-theme
-claude: { fg: "#d97757", bg: "#313244" }
-directory: { fg: "#89dceb", bg: "#1e1e2e" }
-git: { fg: "#eba0ac", bg: "#313244" }
-model: { fg: "#b4befe", bg: "#1e1e2e" }
-context: { fg: "#fab387", bg: "#313244" }
-cost: { fg: "#a6e3a1", bg: "#45475a" }
+name: synthwave
+claude: { fg: "#ff7edb", bg: "#2a2139" }
+directory: { fg: "#36f9f6", bg: "#241b2f" }
+git: { fg: "#ff8b39", bg: "#2a2139" }
+model: { fg: "#b893ce", bg: "#241b2f" }
+context: { fg: "#fede5d", bg: "#2a2139" }
+cost: { fg: "#72f1b8", bg: "#34294f" }
 ```
+
+![the status line with the synthwave custom theme](docs/custom-theme.png)
 
 Every field is optional, right down to individual `fg`/`bg` values within a
 family — anything left unspecified falls back to the corresponding
@@ -136,10 +150,11 @@ Releases are automatic. Every merge to `main` runs
 `.github/workflows/release.yml`, which asks [git-cliff](https://git-cliff.org)
 for the next semver based on the conventional commits since the last tag,
 pushes that `vX.Y.Z` tag, builds the static `x86_64-unknown-linux-musl`
-binary, and publishes a GitHub release with a git-cliff changelog
-(`feat` → minor, breaking → major, anything else → patch). The committed
-`Cargo.toml` version is not bumped; the binary is stamped with the tag
-version at build time.
+binary, publishes a GitHub release with a git-cliff changelog
+(`feat` → minor, breaking → major, anything else → patch), and pushes the
+crate to crates.io. The committed `Cargo.toml` version is not bumped; the
+binary and the published crate are stamped with the tag version at build
+time.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org),
 enforced by a [pre-commit](https://pre-commit.com) `commit-msg` hook:
