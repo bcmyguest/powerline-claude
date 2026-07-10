@@ -10,18 +10,22 @@ setup, rewritten from scratch with a
 
 ## Quick start
 
-Run each of the following in `claude`, one at a time:
+These are Claude Code slash commands, not shell commands: start a `claude`
+session and enter each one _at the Claude prompt_, one at a time.
 
-```
-/plugin marketplace add bcmyguest/powerline-claude
-/plugin install powerline-claude@powerline-claude
-/reload-plugins
-/powerline-claude:configure
-```
+`/plugin marketplace add bcmyguest/powerline-claude`
 
-`/powerline-claude:configure` downloads the binary if it's missing, points
-`statusLine` in `~/.claude/settings.json` at it, and walks you through theme,
-segments, and separator mode.
+`/plugin install powerline-claude@powerline-claude`
+
+`/reload-plugins`
+
+Then run the setup command (also inside Claude):
+
+`/powerline-claude:configure`
+
+It downloads the binary if it's missing, points `statusLine` in
+`~/.claude/settings.json` at it, and walks you through theme, segments, and
+separator mode.
 
 ## Manual install
 
