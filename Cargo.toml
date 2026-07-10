@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 description = "Powerline-style status line for Claude Code"
 license = "AGPL-3.0-only"
+authors = ["powerline-claude contributors"]
+readme = "README.md"
+repository = "https://github.com/bcmyguest/powerline-claude"
+homepage = "https://github.com/bcmyguest/powerline-claude"
+documentation = "https://github.com/bcmyguest/powerline-claude#readme"
+keywords = ["claude-code", "statusline", "powerline", "claude", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["docs/", "plugin/", ".claude-plugin/", ".github/", "cliff.toml", ".pre-commit-config.yaml"]
 
 [lib]
 name = "powerline_claude"

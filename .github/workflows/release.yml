@@ -2,8 +2,9 @@ name: release
 
 # Every merge to main cuts a release: git-cliff computes the next semver from
 # the conventional commits since the last tag, the workflow pushes that
-# vX.Y.Z tag, builds the static musl binary, and publishes a GitHub release
-# with git-cliff release notes. If nothing releasable landed (only
+# vX.Y.Z tag, builds the static musl binary, publishes a GitHub release
+# with git-cliff release notes, and pushes the crate to crates.io (when a
+# CARGO_REGISTRY_TOKEN secret is configured). If nothing releasable landed (only
 # unconventional or chore(release) commits), the bumped version equals the
 # latest tag and the run exits early.
 #
@@ -91,3 +92,17 @@ jobs:
           tag_name: ${{ steps.bump.outputs.next }}
           body_path: release-notes.md
           files: release/*
+
+      # Publishes the crate with the same stamped version as the tag. Skipped
+      # quietly until a CARGO_REGISTRY_TOKEN repo secret is configured.
+      # --allow-dirty because the version stamp above edits Cargo.toml in place.
+      - name: Publish to crates.io
+        if: steps.bump.outputs.skip == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
+            exit 0
+          fi
+          cargo publish --allow-dirty
