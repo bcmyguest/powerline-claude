@@ -39,7 +39,7 @@ Constraints to preserve:
 
 ## Releases
 
-Every merge to `main` runs `.github/workflows/release.yml`: git-cliff computes the next semver from conventional commits (`feat` → minor, breaking → major, else patch), pushes the `vX.Y.Z` tag, builds the static musl binary, publishes a GitHub release, and publishes to crates.io when a `CARGO_REGISTRY_TOKEN` secret exists. The committed `Cargo.toml` version is never bumped — the workflow seds the tag version in at build time. Don't bump the version in PRs.
+Every merge to `main` runs `.github/workflows/release.yml`: git-cliff computes the next semver from conventional commits (`feat` → minor, breaking → major, else patch), pushes the `vX.Y.Z` tag, builds the static musl binary, publishes a GitHub release, and publishes to crates.io via Trusted Publishing (OIDC; skipped quietly until the repo is registered as a trusted publisher for the crate). The committed `Cargo.toml` version is never bumped — the workflow seds the tag version in at build time. Don't bump the version in PRs.
 
 ## Plugin
 

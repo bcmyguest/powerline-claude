@@ -3,10 +3,11 @@ name: release
 # Every merge to main cuts a release: git-cliff computes the next semver from
 # the conventional commits since the last tag, the workflow pushes that
 # vX.Y.Z tag, builds the static musl binary, publishes a GitHub release
-# with git-cliff release notes, and pushes the crate to crates.io (when a
-# CARGO_REGISTRY_TOKEN secret is configured). If nothing releasable landed (only
-# unconventional or chore(release) commits), the bumped version equals the
-# latest tag and the run exits early.
+# with git-cliff release notes, and pushes the crate to crates.io via Trusted
+# Publishing (OIDC; skipped quietly until this repo/workflow is registered as
+# a trusted publisher for the crate on crates.io). If nothing releasable
+# landed (only unconventional or chore(release) commits), the bumped version
+# equals the latest tag and the run exits early.
 #
 # The crate version in Cargo.toml stays at its committed value; the binary is
 # stamped with the tag version at build time so `powerline-claude --version`
@@ -18,6 +19,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # crates.io Trusted Publishing (OIDC)
 
 concurrency:
   group: release
@@ -93,16 +95,20 @@ jobs:
           body_path: release-notes.md
           files: release/*
 
-      # Publishes the crate with the same stamped version as the tag. Skipped
-      # quietly until a CARGO_REGISTRY_TOKEN repo secret is configured.
+      # Exchanges the run's OIDC identity for a short-lived crates.io token
+      # (Trusted Publishing — no long-lived secret). continue-on-error keeps
+      # the release green until the repo is registered as a trusted publisher
+      # for the crate on crates.io.
+      - name: Authenticate with crates.io
+        id: crates-auth
+        if: steps.bump.outputs.skip == 'false'
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@v1
+
+      # Publishes the crate with the same stamped version as the tag.
       # --allow-dirty because the version stamp above edits Cargo.toml in place.
       - name: Publish to crates.io
-        if: steps.bump.outputs.skip == 'false'
+        if: steps.bump.outputs.skip == 'false' && steps.crates-auth.outcome == 'success'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "CARGO_REGISTRY_TOKEN not set; skipping crates.io publish."
-            exit 0
-          fi
-          cargo publish --allow-dirty
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+        run: cargo publish --allow-dirty
