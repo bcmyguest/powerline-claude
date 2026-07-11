@@ -35,11 +35,19 @@ separator mode.
 
 ## Manual install
 
-Grab the static binary from the latest release:
+Grab the static binary for your platform from the latest release —
+`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+`aarch64-apple-darwin`, or `x86_64-apple-darwin`:
 
 ```bash
+case "$(uname -sm)" in
+  "Linux x86_64")   target=x86_64-unknown-linux-musl ;;
+  "Linux aarch64")  target=aarch64-unknown-linux-musl ;;
+  "Darwin arm64")   target=aarch64-apple-darwin ;;
+  "Darwin x86_64")  target=x86_64-apple-darwin ;;
+esac
 curl -fsSL -o ~/.local/bin/powerline-claude \
-  https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-x86_64-unknown-linux-musl
+  "https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-$target"
 chmod +x ~/.local/bin/powerline-claude
 ```
 
@@ -172,8 +180,9 @@ is testable without a terminal; fixtures live in `tests/fixtures/`.
 Releases are automatic. Every merge to `main` runs
 `.github/workflows/release.yml`, which asks [git-cliff](https://git-cliff.org)
 for the next semver based on the conventional commits since the last tag,
-pushes that `vX.Y.Z` tag, builds the static `x86_64-unknown-linux-musl`
-binary, publishes a GitHub release with a git-cliff changelog
+pushes that `vX.Y.Z` tag, builds a static binary per supported target
+(x86_64/aarch64 linux-musl and aarch64/x86_64 apple-darwin), publishes a
+GitHub release with a git-cliff changelog
 (`feat` → minor, breaking → major, anything else → patch), and pushes the
 crate to crates.io via [Trusted Publishing](https://crates.io/docs/trusted-publishing)
 (the crate's crates.io settings must list this repo and `release.yml` as a
