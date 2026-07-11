@@ -75,7 +75,7 @@ Flags go on that command string:
 |------|---------|---------|
 | `--modules` | `logo,dir,git,model,context,cost,usage,stats,effort` | Segments to render, in order |
 | `--modules-right` | (empty) | Segments pinned to the right edge of the terminal, e.g. `--modules-right context,cost` |
-| `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, or a path to a [custom theme directory](#custom-themes) |
+| `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, a path to a [custom theme directory](#custom-themes), or the name of one under `~/.config/powerline-claude/themes/` |
 | `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain-Unicode separators and segment icons — no patched font needed), `flat` (no separators) |
 | `--no-progress` | off | Suppress the OSC 9;4 terminal progress bar |
 | `--width` | `$COLUMNS`, then parent TTY, then 200 | Terminal width (drives dir truncation) |
@@ -87,9 +87,20 @@ resolves to an existing directory, powerline-claude reads `theme.yaml` from
 inside it instead of looking up a vendored palette:
 
 ```bash
-powerline-claude --theme ~/.config/powerline-claude/themes/my-theme
+powerline-claude --theme ~/projects/my-theme
+# reads ~/projects/my-theme/theme.yaml
+```
+
+Themes dropped under `~/.config/powerline-claude/themes/` can be selected by
+bare name — any `--theme` value that isn't a built-in palette or an existing
+directory path is looked up there:
+
+```bash
+powerline-claude --theme my-theme
 # reads ~/.config/powerline-claude/themes/my-theme/theme.yaml
 ```
+
+Built-in palette names always win, so a custom theme can't shadow `nord`.
 
 `theme.yaml` defines fg/bg hex colors for the eight segment families
 (`claude`, `directory`, `git`, `model`, `context`, `context_warn`,

@@ -53,7 +53,7 @@ pub fn run(
     tty_width: impl FnOnce() -> Option<usize>,
 ) -> Result<Output, String> {
     let payload = Payload::from_json(payload_json).map_err(|e| format!("bad payload: {e}"))?;
-    let theme = theme::Theme::by_name(&cli.theme)?;
+    let theme = theme::Theme::resolve(&cli.theme, &env.home)?;
     let modules = segments::parse_modules(&cli.modules)?;
     let modules_right = segments::parse_modules(&cli.modules_right)?;
     let mode: render::Mode = cli.mode.parse()?;

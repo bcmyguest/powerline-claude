@@ -175,6 +175,33 @@ fn modules_flag_selects_and_orders_segments() {
 }
 
 #[test]
+fn bare_theme_name_resolves_from_the_home_config_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let theme_dir = home.path().join(".config/powerline-claude/themes/my-theme");
+    std::fs::create_dir_all(&theme_dir).unwrap();
+    std::fs::write(theme_dir.join("theme.yaml"), "model: { bg: \"#123456\" }\n").unwrap();
+    let env = Env {
+        home: home.path().to_str().unwrap().to_string(),
+        columns: None,
+    };
+    let out = run(
+        include_str!("fixtures/full.json"),
+        &cli(&[
+            "--theme",
+            "my-theme",
+            "--modules",
+            "model",
+            "--mode",
+            "flat",
+        ]),
+        &env,
+        || None,
+    )
+    .unwrap();
+    assert!(out.bar.contains("\x1b[48;2;18;52;86m"), "{:?}", out.bar);
+}
+
+#[test]
 fn unknown_theme_is_a_readable_error() {
     let err = run_fixture(include_str!("fixtures/full.json"), &["--theme", "nope"]).unwrap_err();
     assert!(err.contains("unknown theme 'nope'"), "{err}");

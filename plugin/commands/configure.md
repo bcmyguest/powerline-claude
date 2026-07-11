@@ -42,7 +42,9 @@ Steps:
    (default `--mode patched` needs one; otherwise add `--mode compatible`).
 3. Ask what they want to change (unless $ARGUMENTS already says), offering:
    - `--theme`: catppuccin-mocha (default), catppuccin-frappe, dracula,
-     gruvbox-dark, nord, tokyonight
+     gruvbox-dark, nord, tokyonight; also a path to a custom theme
+     directory, or the bare name of one under
+     `~/.config/powerline-claude/themes/`
    - `--modules`: any order/subset of
      logo,dir,git,model,context,cost,usage,stats,effort
    - `--modules-right`: same values, pinned to the right edge of the terminal
