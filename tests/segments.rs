@@ -3,7 +3,7 @@ use std::fs;
 use powerline_claude::payload::Payload;
 use powerline_claude::segments::{
     Module, format_cost, format_duration, format_model, format_tokens, git_branch, parse_modules,
-    truncate_dir,
+    segment_texts, truncate_dir,
 };
 use powerline_claude::theme::{Rgb, Theme};
 
@@ -204,6 +204,58 @@ fn unknown_module_error_names_it_and_lists_valid_ones() {
 }
 
 // --- composition: payload -> segment texts ---
+
+fn payload(json: &str) -> Payload {
+    Payload::from_json(json).unwrap()
+}
+
+fn tempdir_repo(branch: &str) -> tempfile::TempDir {
+    let repo = tempfile::tempdir().unwrap();
+    fs::create_dir(repo.path().join(".git")).unwrap();
+    fs::write(
+        repo.path().join(".git/HEAD"),
+        format!("ref: refs/heads/{branch}\n"),
+    )
+    .unwrap();
+    repo
+}
+
+#[test]
+fn git_segment_appends_churn_when_both_line_counts_exist() {
+    let repo = tempdir_repo("main");
+    let p = payload(&format!(
+        r#"{{"workspace": {{"current_dir": "{}"}},
+             "cost": {{"total_lines_added": 5, "total_lines_removed": 2}}}}"#,
+        repo.path().display()
+    ));
+    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user");
+    assert_eq!(
+        texts,
+        vec![(Module::Git, "\u{e0a0} main +5 -2".to_string())]
+    );
+}
+
+#[test]
+fn git_segment_omits_churn_when_a_line_count_is_missing() {
+    let repo = tempdir_repo("main");
+    let p = payload(&format!(
+        r#"{{"workspace": {{"current_dir": "{}"}},
+             "cost": {{"total_lines_added": 5}}}}"#,
+        repo.path().display()
+    ));
+    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user");
+    assert_eq!(texts, vec![(Module::Git, "\u{e0a0} main".to_string())]);
+}
+
+#[test]
+fn each_optional_segment_drops_when_its_data_is_absent() {
+    // model only: dir, git, cost, stats, and effort must all drop; logo
+    // always renders and context shows its placeholder.
+    let p = payload(r#"{"model": {"display_name": "Sonnet 5"}}"#);
+    let texts = segment_texts(&p, &Module::default_order(), 200, "/home/user");
+    let modules: Vec<Module> = texts.iter().map(|(module, _)| *module).collect();
+    assert_eq!(modules, vec![Module::Logo, Module::Model, Module::Context]);
+}
 
 #[test]
 fn segments_skip_absent_data() {

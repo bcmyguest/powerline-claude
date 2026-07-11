@@ -101,6 +101,26 @@ fn garbage_payload_is_an_error_not_a_panic() {
     assert!(run_fixture("not json", &[]).is_err());
 }
 
+#[test]
+fn git_segment_flows_through_run_with_line_churn() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir(repo.path().join(".git")).unwrap();
+    std::fs::write(repo.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    let payload = format!(
+        r#"{{"workspace": {{"current_dir": "{}"}},
+             "cost": {{"total_lines_added": 156, "total_lines_removed": 23}}}}"#,
+        repo.path().display()
+    );
+    let out = run(
+        &payload,
+        &cli(&["--modules", "git", "--mode", "flat"]),
+        &env(),
+        || None,
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " \u{e0a0} main +156 -23 ");
+}
+
 // --- progress output ---
 
 #[test]
