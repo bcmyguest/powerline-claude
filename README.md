@@ -152,9 +152,12 @@ for the next semver based on the conventional commits since the last tag,
 pushes that `vX.Y.Z` tag, builds the static `x86_64-unknown-linux-musl`
 binary, publishes a GitHub release with a git-cliff changelog
 (`feat` → minor, breaking → major, anything else → patch), and pushes the
-crate to crates.io. The committed `Cargo.toml` version is not bumped; the
-binary and the published crate are stamped with the tag version at build
-time.
+crate to crates.io via [Trusted Publishing](https://crates.io/docs/trusted-publishing)
+(the crate's crates.io settings must list this repo and `release.yml` as a
+trusted publisher). Running the workflow manually re-publishes the latest
+existing tag to crates.io without cutting a new release. The committed
+`Cargo.toml` version is not bumped; the binary and the published crate are
+stamped with the tag version at build time.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org),
 enforced by a [pre-commit](https://pre-commit.com) `commit-msg` hook:
