@@ -209,7 +209,12 @@ fn unknown_module_error_names_it_and_lists_valid_ones() {
 fn segments_skip_absent_data() {
     // minimal payload: no cost, no effort, dir exists but is no git repo
     let payload = Payload::from_json(include_str!("fixtures/minimal.json")).unwrap();
-    let texts = powerline_claude::segments::segment_texts(&payload, &Module::default_order(), 200);
+    let texts = powerline_claude::segments::segment_texts(
+        &payload,
+        &Module::default_order(),
+        200,
+        "/home/user",
+    );
     let joined: Vec<&str> = texts.iter().map(|(_, t)| t.as_str()).collect();
     assert!(joined.iter().any(|t| t.contains("sonnet 5")), "{joined:?}");
     assert!(joined.iter().any(|t| t == &"~~ tok"), "{joined:?}");

@@ -1,10 +1,23 @@
 use powerline_claude::cli::Cli;
-use powerline_claude::run;
+use powerline_claude::{Env, run};
 
 use clap::Parser;
 
 fn cli(args: &[&str]) -> Cli {
     Cli::try_parse_from(std::iter::once("powerline-claude").chain(args.iter().copied())).unwrap()
+}
+
+/// A fixed environment matching the fixtures, so goldens are the same on
+/// every machine regardless of the real $HOME or $COLUMNS.
+fn env() -> Env {
+    Env {
+        home: "/home/user".to_string(),
+        columns: None,
+    }
+}
+
+fn run_fixture(json: &str, args: &[&str]) -> Result<powerline_claude::Output, String> {
+    run(json, &cli(args), &env(), || None)
 }
 
 fn strip_ansi(s: &str) -> String {
@@ -50,13 +63,10 @@ fn cli_defaults_match_the_documented_interface() {
 
 #[test]
 fn full_payload_renders_every_data_backed_segment() {
-    // fixture dir is not a git repo on this machine, so `git` is skipped
-    let out = run(
-        include_str!("fixtures/full.json"),
-        &cli(&["--width", "200"]),
-    )
-    .unwrap();
-    let visible = strip_ansi(&out);
+    // fixture dir does not exist, so `git` is skipped (see the tempdir-repo
+    // test below for the git path)
+    let out = run_fixture(include_str!("fixtures/full.json"), &["--width", "200"]).unwrap();
+    let visible = strip_ansi(&out.bar);
     assert_eq!(
         visible,
         "░▒▓ \u{f4f5} \u{e0b0} apps/emissions \u{e0b1} \u{f16a6} opus 4.8 \u{e0b0} \
@@ -66,52 +76,78 @@ fn full_payload_renders_every_data_backed_segment() {
 
 #[test]
 fn modules_flag_selects_and_orders_segments() {
-    let out = run(
+    let out = run_fixture(
         include_str!("fixtures/full.json"),
-        &cli(&["--modules", "cost,model", "--mode", "flat"]),
+        &["--modules", "cost,model", "--mode", "flat"],
     )
     .unwrap();
-    assert_eq!(strip_ansi(&out), " $0.71  \u{f16a6} opus 4.8 ");
+    assert_eq!(strip_ansi(&out.bar), " $0.71  \u{f16a6} opus 4.8 ");
 }
 
 #[test]
 fn unknown_theme_is_a_readable_error() {
-    let err = run(
-        include_str!("fixtures/full.json"),
-        &cli(&["--theme", "nope"]),
-    )
-    .unwrap_err();
+    let err = run_fixture(include_str!("fixtures/full.json"), &["--theme", "nope"]).unwrap_err();
     assert!(err.contains("unknown theme 'nope'"), "{err}");
 }
 
 #[test]
 fn unknown_module_is_a_readable_error() {
-    let err = run(
-        include_str!("fixtures/full.json"),
-        &cli(&["--modules", "bogus"]),
-    )
-    .unwrap_err();
+    let err = run_fixture(include_str!("fixtures/full.json"), &["--modules", "bogus"]).unwrap_err();
     assert!(err.contains("unknown module 'bogus'"), "{err}");
 }
 
 #[test]
 fn garbage_payload_is_an_error_not_a_panic() {
-    assert!(run("not json", &cli(&[])).is_err());
+    assert!(run_fixture("not json", &[]).is_err());
+}
+
+// --- progress output ---
+
+#[test]
+fn full_payload_emits_the_progress_sequence() {
+    let out = run_fixture(include_str!("fixtures/full.json"), &[]).unwrap();
+    // 15500 / 200000 = 7% used -> normal state, fill 7*100/80 = 8
+    assert_eq!(out.progress.as_deref(), Some("\x1b]9;4;1;8\x07"));
 }
 
 #[test]
-fn context_percent_is_exposed_for_the_progress_bar() {
-    let payload =
-        powerline_claude::payload::Payload::from_json(include_str!("fixtures/full.json")).unwrap();
-    // 15500 / 200000
-    assert_eq!(powerline_claude::context_percent(&payload), Some(7));
+fn no_progress_flag_suppresses_the_sequence() {
+    let out = run_fixture(include_str!("fixtures/full.json"), &["--no-progress"]).unwrap();
+    assert_eq!(out.progress, None);
 }
 
 #[test]
-fn width_prefers_flag_then_columns_env_then_default() {
+fn payload_without_context_numbers_emits_no_progress() {
+    // minimal.json: current_usage is null and total_input_tokens is 0
+    let out = run_fixture(include_str!("fixtures/minimal.json"), &[]).unwrap();
+    assert_eq!(out.progress, None);
+}
+
+// --- width ---
+
+#[test]
+fn width_prefers_flag_then_columns_then_tty_probe_then_default() {
     use powerline_claude::resolve_width;
-    assert_eq!(resolve_width(Some(120), Some("80")), 120);
-    assert_eq!(resolve_width(None, Some("80")), 80);
-    assert_eq!(resolve_width(None, Some("not a number")), 200);
-    assert_eq!(resolve_width(None, None), 200);
+    assert_eq!(resolve_width(Some(120), Some("80"), || Some(60)), 120);
+    assert_eq!(resolve_width(None, Some("80"), || Some(60)), 80);
+    assert_eq!(resolve_width(None, None, || Some(60)), 60);
+    assert_eq!(resolve_width(None, None, || None), 200);
+    // unparsable COLUMNS falls through to the probe
+    assert_eq!(resolve_width(None, Some("not a number"), || Some(60)), 60);
+}
+
+#[test]
+fn columns_env_drives_dir_truncation_through_run() {
+    let narrow = Env {
+        home: "/home/user".to_string(),
+        columns: Some("79".to_string()),
+    };
+    let out = run(
+        include_str!("fixtures/full.json"),
+        &cli(&["--modules", "dir", "--mode", "flat"]),
+        &narrow,
+        || None,
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " emissions ");
 }

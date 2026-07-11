@@ -257,18 +257,20 @@ fn branch_from_head(head_path: &Path) -> Option<String> {
 
 /// Build the text for every requested module, skipping modules whose data is
 /// absent from the payload. Returns `(module, text)` pairs ready for theming.
+/// `home` comes from the caller (see `Env`) so nothing here reads the
+/// process environment.
 pub fn segment_texts(
     payload: &Payload,
     modules: &[Module],
     columns: usize,
+    home: &str,
 ) -> Vec<(Module, String)> {
-    let home = std::env::var("HOME").unwrap_or_default();
     modules
         .iter()
         .filter_map(|module| {
             let text = match module {
                 Module::Logo => Some(LOGO.to_string()),
-                Module::Dir => payload.dir().map(|dir| truncate_dir(dir, &home, columns)),
+                Module::Dir => payload.dir().map(|dir| truncate_dir(dir, home, columns)),
                 Module::Git => git_segment(payload),
                 Module::Model => payload.model_display_name().map(format_model),
                 Module::Context => Some(format_tokens(payload.current_tokens())),

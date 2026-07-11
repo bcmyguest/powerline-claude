@@ -1,12 +1,12 @@
 //! powerline-claude: a powerline-style status line for Claude Code.
 //!
-//! `run` is the whole program: statusline JSON in, ANSI bar out. The binary
-//! in `main.rs` only wires stdin/stdout, terminal width, and the optional
-//! progress-bar escape around it.
+//! `run` is the whole program: statusline JSON and ambient state in, every
+//! byte the program prints out. The binary in `main.rs` only wires stdin,
+//! stdout, and `/dev/tty` around it.
 
 pub mod cli;
 pub mod payload;
-pub mod progress;
+mod progress;
 pub mod render;
 pub mod segments;
 pub mod theme;
@@ -17,33 +17,83 @@ use render::Segment;
 
 const DEFAULT_WIDTH: usize = 200;
 
-pub fn run(payload_json: &str, cli: &Cli) -> Result<String, String> {
+/// Ambient process state the bar depends on, passed in explicitly so `run`
+/// stays pure and fixture-driven tests are deterministic on any machine.
+#[derive(Debug, Clone)]
+pub struct Env {
+    /// `$HOME`, for tilde-shortening the dir segment.
+    pub home: String,
+    /// Raw `$COLUMNS` value (set by Claude Code v2.1.153+).
+    pub columns: Option<String>,
+}
+
+impl Env {
+    pub fn from_process() -> Self {
+        Self {
+            home: std::env::var("HOME").unwrap_or_default(),
+            columns: std::env::var("COLUMNS").ok(),
+        }
+    }
+}
+
+/// Everything the program prints, decided in one place.
+#[derive(Debug)]
+pub struct Output {
+    /// The ANSI powerline bar, for stdout.
+    pub bar: String,
+    /// OSC 9;4 progress sequence for the controlling terminal, present when
+    /// the payload has context numbers and `--no-progress` is off.
+    pub progress: Option<String>,
+}
+
+pub fn run(
+    payload_json: &str,
+    cli: &Cli,
+    env: &Env,
+    tty_width: impl FnOnce() -> Option<usize>,
+) -> Result<Output, String> {
     let payload = Payload::from_json(payload_json).map_err(|e| format!("bad payload: {e}"))?;
     let theme = theme::Theme::by_name(&cli.theme)?;
     let modules = segments::parse_modules(&cli.modules)?;
     let mode: render::Mode = cli.mode.parse()?;
-    let width = resolve_width(cli.width, std::env::var("COLUMNS").ok().as_deref());
+    let width = resolve_width(cli.width, env.columns.as_deref(), tty_width);
 
-    let segments: Vec<Segment> = segments::segment_texts(&payload, &modules, width)
+    let segments: Vec<Segment> = segments::segment_texts(&payload, &modules, width, &env.home)
         .into_iter()
         .map(|(module, text)| Segment {
             text,
             colors: module.colors(&theme),
         })
         .collect();
-    Ok(render::render(&segments, mode))
+
+    let progress = if cli.no_progress {
+        None
+    } else {
+        context_percent(&payload).map(progress::osc_sequence)
+    };
+
+    Ok(Output {
+        bar: render::render(&segments, mode),
+        progress,
+    })
 }
 
-/// Terminal width: explicit flag, then the COLUMNS variable Claude Code sets
-/// (v2.1.153+), then a wide default so nothing truncates needlessly.
-pub fn resolve_width(flag: Option<usize>, columns_env: Option<&str>) -> usize {
+/// Terminal width precedence: explicit flag, then `$COLUMNS`, then the
+/// parent-TTY probe (only consulted when the first two yield nothing — it
+/// spawns subprocesses), then a wide default so nothing truncates needlessly.
+pub fn resolve_width(
+    flag: Option<usize>,
+    columns_env: Option<&str>,
+    tty_width: impl FnOnce() -> Option<usize>,
+) -> usize {
     flag.or_else(|| columns_env.and_then(|value| value.parse().ok()))
+        .or_else(tty_width)
         .unwrap_or(DEFAULT_WIDTH)
 }
 
 /// Context usage as a percentage of the window, when the payload has both
 /// numbers. Drives the OSC progress bar.
-pub fn context_percent(payload: &Payload) -> Option<u64> {
+fn context_percent(payload: &Payload) -> Option<u64> {
     let tokens = payload.current_tokens()?;
     let size = payload.context_window_size()?;
     if size == 0 || tokens == 0 {

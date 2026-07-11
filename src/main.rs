@@ -1,55 +1,39 @@
-//! Binary shim: stdin/stdout wiring around `powerline_claude::run`.
+//! Binary shim: stdin, stdout, and `/dev/tty` wiring around
+//! `powerline_claude::run` — no decisions of its own.
 
 use std::io::{Read, Write};
 use std::process::Command;
 
 use clap::Parser;
 
-use powerline_claude::cli::Cli;
-use powerline_claude::payload::Payload;
-use powerline_claude::{context_percent, progress, run};
+use powerline_claude::{Env, run};
 
 fn main() {
-    let mut cli = Cli::parse();
+    let cli = powerline_claude::cli::Cli::parse();
 
     let mut input = String::new();
     let _ = std::io::stdin().read_to_string(&mut input);
 
-    // COLUMNS is set by Claude Code v2.1.153+; older versions need the
-    // parent-TTY walk the bash script used.
-    if cli.width.is_none() && std::env::var("COLUMNS").is_err() {
-        cli.width = parent_tty_width();
-    }
-
-    match run(&input, &cli) {
-        Ok(bar) => {
-            print!("{bar}");
+    match run(&input, &cli, &Env::from_process(), parent_tty_width) {
+        Ok(output) => {
+            print!("{}", output.bar);
             let _ = std::io::stdout().flush();
+            // Stdout is captured by Claude Code; the progress escape must go
+            // straight to the terminal.
+            if let Some(progress) = output.progress
+                && let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty")
+            {
+                let _ = tty.write_all(progress.as_bytes());
+            }
         }
         Err(err) => print!("powerline-claude: {err}"),
-    }
-
-    if !cli.no_progress {
-        emit_progress_bar(&input);
-    }
-}
-
-/// Send the OSC 9;4 context progress bar straight to the terminal (stdout is
-/// captured by Claude Code, /dev/tty is not).
-fn emit_progress_bar(input: &str) {
-    let Ok(payload) = Payload::from_json(input) else {
-        return;
-    };
-    let Some(percent) = context_percent(&payload) else {
-        return;
-    };
-    if let Ok(mut tty) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
-        let _ = tty.write_all(progress::osc_sequence(percent).as_bytes());
     }
 }
 
 /// Width of the terminal the parent process is attached to. The statusline
-/// subprocess has no TTY of its own, so ask `ps` for the parent's.
+/// subprocess has no TTY of its own, so ask `ps` for the parent's. Only
+/// called by `resolve_width` when `--width` and `$COLUMNS` are both absent
+/// (Claude Code < 2.1.153).
 fn parent_tty_width() -> Option<usize> {
     let ppid = command_line(&["-o", "ppid=", "-p", &std::process::id().to_string()])?;
     let tty = command_line(&["-o", "tty=", "-p", &ppid])?;
