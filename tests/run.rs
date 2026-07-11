@@ -13,6 +13,7 @@ fn env() -> Env {
     Env {
         home: "/home/user".to_string(),
         columns: None,
+        now: None,
     }
 }
 
@@ -76,6 +77,25 @@ fn full_payload_renders_every_data_backed_segment() {
         "░▒▓ \u{f4f5} \u{e0b0} apps/emissions \u{e0b1} \u{f16a6} opus 4.8 \u{e0b0} \
          15,500 tok \u{e0b0} $0.71 \u{e0b1} 5h 77% · 7d 59% \u{e0b0} 1h 12m \u{e0b0} high \u{e0b0}"
     );
+}
+
+#[test]
+fn compatible_mode_renders_without_nerd_font_glyphs() {
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &["--mode", "compatible", "--width", "200"],
+    )
+    .unwrap();
+    let visible = strip_ansi(&out.bar);
+    assert!(
+        !visible
+            .chars()
+            .any(|c| ('\u{e000}'..='\u{f8ff}').contains(&c)
+                || ('\u{f0000}'..='\u{10ffff}').contains(&c)),
+        "no private-use glyphs in compatible mode: {visible:?}"
+    );
+    assert!(visible.contains("\u{2733}"), "plain logo: {visible:?}");
+    assert!(visible.contains("opus 4.8"), "{visible:?}");
 }
 
 #[test]
@@ -146,6 +166,40 @@ fn usage_renders_remaining_rate_limit_budget() {
 }
 
 #[test]
+fn usage_shows_reset_countdowns_when_the_clock_is_known() {
+    // fixture resets_at: five_hour 1738425600, seven_day 1738857600
+    let clocked = Env {
+        home: "/home/user".to_string(),
+        columns: None,
+        now: Some(1_738_418_400), // 2h before the 5h reset, ~5d before the 7d one
+    };
+    let out = run(
+        include_str!("fixtures/full.json"),
+        &cli(&["--modules", "usage", "--mode", "flat"]),
+        &clocked,
+        || None,
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " 5h 77% (2h) · 7d 59% (5d) ");
+}
+
+#[test]
+fn usage_under_20_percent_remaining_gets_the_warn_background() {
+    let payload = r#"{"rate_limits":{"five_hour":{"used_percentage":85.0}}}"#;
+    let out = run_fixture(payload, &["--modules", "usage", "--mode", "flat"]).unwrap();
+    // catppuccin-mocha context_warn bg: #fab387
+    assert!(out.bar.contains("\x1b[48;2;250;179;135m"), "{:?}", out.bar);
+}
+
+#[test]
+fn usage_under_5_percent_remaining_gets_the_alert_background() {
+    let payload = r#"{"rate_limits":{"seven_day":{"used_percentage":96.0}}}"#;
+    let out = run_fixture(payload, &["--modules", "usage", "--mode", "flat"]).unwrap();
+    // catppuccin-mocha context_alert bg: #f38ba8
+    assert!(out.bar.contains("\x1b[48;2;243;139;168m"), "{:?}", out.bar);
+}
+
+#[test]
 fn modules_flag_selects_and_orders_segments() {
     let out = run_fixture(
         include_str!("fixtures/full.json"),
@@ -153,6 +207,34 @@ fn modules_flag_selects_and_orders_segments() {
     )
     .unwrap();
     assert_eq!(strip_ansi(&out.bar), " $0.71  \u{f16a6} opus 4.8 ");
+}
+
+#[test]
+fn bare_theme_name_resolves_from_the_home_config_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let theme_dir = home.path().join(".config/powerline-claude/themes/my-theme");
+    std::fs::create_dir_all(&theme_dir).unwrap();
+    std::fs::write(theme_dir.join("theme.yaml"), "model: { bg: \"#123456\" }\n").unwrap();
+    let env = Env {
+        home: home.path().to_str().unwrap().to_string(),
+        columns: None,
+        now: None,
+    };
+    let out = run(
+        include_str!("fixtures/full.json"),
+        &cli(&[
+            "--theme",
+            "my-theme",
+            "--modules",
+            "model",
+            "--mode",
+            "flat",
+        ]),
+        &env,
+        || None,
+    )
+    .unwrap();
+    assert!(out.bar.contains("\x1b[48;2;18;52;86m"), "{:?}", out.bar);
 }
 
 #[test]
@@ -232,6 +314,7 @@ fn columns_env_drives_dir_truncation_through_run() {
     let narrow = Env {
         home: "/home/user".to_string(),
         columns: Some("79".to_string()),
+        now: None,
     };
     let out = run(
         include_str!("fixtures/full.json"),

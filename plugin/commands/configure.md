@@ -11,17 +11,24 @@ User request (may be empty): $ARGUMENTS
 Steps:
 
 1. Verify `~/.local/bin/powerline-claude --help` runs. If the binary is
-   missing, install it:
+   missing, install the release asset for this platform:
 
    ```bash
+   case "$(uname -sm)" in
+     "Linux x86_64")   target=x86_64-unknown-linux-musl ;;
+     "Linux aarch64")  target=aarch64-unknown-linux-musl ;;
+     "Darwin arm64")   target=aarch64-apple-darwin ;;
+     "Darwin x86_64")  target=x86_64-apple-darwin ;;
+     *)                target= ;;
+   esac
    mkdir -p ~/.local/bin
    curl -fsSL -o ~/.local/bin/powerline-claude \
-     https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-x86_64-unknown-linux-musl
+     "https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-$target"
    chmod +x ~/.local/bin/powerline-claude
    ```
 
-   The release asset is x86_64-linux only; on other platforms (or if the
-   download fails) fall back to building from source when cargo is available:
+   On an unmatched platform (or if the download fails) fall back to building
+   from source when cargo is available:
    `cargo install --git https://github.com/bcmyguest/powerline-claude --locked
    --root ~/.local`. If neither works, tell the user and stop.
 2. Read the current `statusLine` entry from `~/.claude/settings.json` and show
@@ -42,12 +49,16 @@ Steps:
    (default `--mode patched` needs one; otherwise add `--mode compatible`).
 3. Ask what they want to change (unless $ARGUMENTS already says), offering:
    - `--theme`: catppuccin-mocha (default), catppuccin-frappe, dracula,
-     gruvbox-dark, nord, tokyonight
+     gruvbox-dark, nord, tokyonight; also a path to a custom theme
+     directory, or the bare name of one under
+     `~/.config/powerline-claude/themes/`
    - `--modules`: any order/subset of
      logo,dir,git,model,context,cost,usage,stats,effort
    - `--modules-right`: same values, pinned to the right edge of the terminal
      (default: none — everything renders on the left)
-   - `--mode`: patched (nerd font), compatible (plain Unicode), flat
+   - `--mode`: patched (nerd font), compatible (plain-Unicode separators
+     and segment icons, for terminals without a patched font), flat (no
+     separators)
    - `--no-progress`: disable the terminal progress bar
 4. To preview a candidate configuration, pipe a sample payload through the
    binary and show the raw output (the user's terminal renders the ANSI):

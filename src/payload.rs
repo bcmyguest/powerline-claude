@@ -67,6 +67,8 @@ struct RateLimits {
 #[derive(Debug, Deserialize)]
 struct RateLimitWindow {
     used_percentage: Option<f64>,
+    /// Unix timestamp (seconds) at which the window resets.
+    resets_at: Option<i64>,
 }
 
 impl Payload {
@@ -146,5 +148,15 @@ impl Payload {
             .seven_day
             .as_ref()?
             .used_percentage
+    }
+
+    /// Unix timestamp at which the 5-hour rate-limit window resets.
+    pub fn five_hour_resets_at(&self) -> Option<i64> {
+        self.rate_limits.as_ref()?.five_hour.as_ref()?.resets_at
+    }
+
+    /// Unix timestamp at which the 7-day rate-limit window resets.
+    pub fn seven_day_resets_at(&self) -> Option<i64> {
+        self.rate_limits.as_ref()?.seven_day.as_ref()?.resets_at
     }
 }

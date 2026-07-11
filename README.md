@@ -35,11 +35,19 @@ separator mode.
 
 ## Manual install
 
-Grab the static binary from the latest release:
+Grab the static binary for your platform from the latest release —
+`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+`aarch64-apple-darwin`, or `x86_64-apple-darwin`:
 
 ```bash
+case "$(uname -sm)" in
+  "Linux x86_64")   target=x86_64-unknown-linux-musl ;;
+  "Linux aarch64")  target=aarch64-unknown-linux-musl ;;
+  "Darwin arm64")   target=aarch64-apple-darwin ;;
+  "Darwin x86_64")  target=x86_64-apple-darwin ;;
+esac
 curl -fsSL -o ~/.local/bin/powerline-claude \
-  https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-x86_64-unknown-linux-musl
+  "https://github.com/bcmyguest/powerline-claude/releases/latest/download/powerline-claude-$target"
 chmod +x ~/.local/bin/powerline-claude
 ```
 
@@ -75,8 +83,8 @@ Flags go on that command string:
 |------|---------|---------|
 | `--modules` | `logo,dir,git,model,context,cost,usage,stats,effort` | Segments to render, in order |
 | `--modules-right` | (empty) | Segments pinned to the right edge of the terminal, e.g. `--modules-right context,cost` |
-| `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, or a path to a [custom theme directory](#custom-themes) |
-| `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain Unicode), `flat` (none) |
+| `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, a path to a [custom theme directory](#custom-themes), or the name of one under `~/.config/powerline-claude/themes/` |
+| `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain-Unicode separators and segment icons — no patched font needed), `flat` (no separators) |
 | `--no-progress` | off | Suppress the OSC 9;4 terminal progress bar |
 | `--width` | `$COLUMNS`, then parent TTY, then 200 | Terminal width (drives dir truncation) |
 
@@ -87,9 +95,20 @@ resolves to an existing directory, powerline-claude reads `theme.yaml` from
 inside it instead of looking up a vendored palette:
 
 ```bash
-powerline-claude --theme ~/.config/powerline-claude/themes/my-theme
+powerline-claude --theme ~/projects/my-theme
+# reads ~/projects/my-theme/theme.yaml
+```
+
+Themes dropped under `~/.config/powerline-claude/themes/` can be selected by
+bare name — any `--theme` value that isn't a built-in palette or an existing
+directory path is looked up there:
+
+```bash
+powerline-claude --theme my-theme
 # reads ~/.config/powerline-claude/themes/my-theme/theme.yaml
 ```
+
+Built-in palette names always win, so a custom theme can't shadow `nord`.
 
 `theme.yaml` defines fg/bg hex colors for the eight segment families
 (`claude`, `directory`, `git`, `model`, `context`, `context_warn`,
@@ -120,18 +139,21 @@ built-in palettes.
 
 ## Segments
 
-- `logo` — Claude glyph
+- `logo` — Claude glyph (`✳` in compatible mode)
 - `dir` — workspace dir, last two path components (one below 80 columns)
 - `git` — current branch (read from `.git/HEAD`, worktree-aware) plus the
-  session's `+added -removed` line counts from the payload
-- `model` — nerd icon + lowercased model name
+  session's `+added -removed` line counts from the payload (`⎇` branch
+  icon in compatible mode)
+- `model` — nerd icon + lowercased model name (no icon in compatible mode)
 - `context` — exact tokens in the context window (`150,697 tok`), `~~ tok`
   before the first API call; turns orange at 80k tokens and red at 125k
   (the `context_warn`/`context_alert` theme families)
 - `cost` — session cost, `$X.XX`
-- `usage` — remaining subscription rate-limit budget (`5h 77% · 7d 59%`:
-  what's left of the rolling 5-hour and 7-day windows); hidden when the
-  payload has no rate-limit data
+- `usage` — remaining subscription rate-limit budget (`5h 77% (2h) · 7d 59% (5d)`:
+  what's left of the rolling 5-hour and 7-day windows and how long until each
+  resets); hidden when the payload has no rate-limit data; turns orange when
+  the tightest window drops under 20% remaining and red under 5% (the same
+  `context_warn`/`context_alert` theme families the context segment uses)
 - `stats` — session duration (`1h 12m`)
 - `effort` — reasoning effort level; hidden when the model doesn't support it
 
@@ -158,8 +180,9 @@ is testable without a terminal; fixtures live in `tests/fixtures/`.
 Releases are automatic. Every merge to `main` runs
 `.github/workflows/release.yml`, which asks [git-cliff](https://git-cliff.org)
 for the next semver based on the conventional commits since the last tag,
-pushes that `vX.Y.Z` tag, builds the static `x86_64-unknown-linux-musl`
-binary, publishes a GitHub release with a git-cliff changelog
+pushes that `vX.Y.Z` tag, builds a static binary per supported target
+(x86_64/aarch64 linux-musl and aarch64/x86_64 apple-darwin), publishes a
+GitHub release with a git-cliff changelog
 (`feat` → minor, breaking → major, anything else → patch), and pushes the
 crate to crates.io via [Trusted Publishing](https://crates.io/docs/trusted-publishing)
 (the crate's crates.io settings must list this repo and `release.yml` as a

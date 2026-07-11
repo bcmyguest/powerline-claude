@@ -35,6 +35,45 @@ fn unknown_theme_error_lists_available_names() {
     );
 }
 
+// --- config-directory resolution ---
+
+fn home_with_theme(name: &str, yaml: &str) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home
+        .path()
+        .join(".config/powerline-claude/themes")
+        .join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    write_theme_yaml(&dir, yaml);
+    home
+}
+
+#[test]
+fn bare_name_resolves_from_the_config_themes_directory() {
+    let home = home_with_theme("my-theme", "claude: { fg: \"#123456\" }\n");
+    let theme = Theme::resolve("my-theme", home.path().to_str().unwrap()).unwrap();
+    assert_eq!(theme.name(), "my-theme");
+    assert_eq!(theme.family(Family::Claude).fg, Rgb::hex(0x123456));
+}
+
+#[test]
+fn builtin_names_win_over_config_directory_themes() {
+    let home = home_with_theme("nord", "claude: { fg: \"#123456\" }\n");
+    let theme = Theme::resolve("nord", home.path().to_str().unwrap()).unwrap();
+    assert_eq!(
+        theme.family(Family::Claude),
+        Theme::by_name("nord").unwrap().family(Family::Claude)
+    );
+}
+
+#[test]
+fn resolve_error_mentions_the_config_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let err = Theme::resolve("missing", home.path().to_str().unwrap()).unwrap_err();
+    assert!(err.contains("unknown theme 'missing'"), "{err}");
+    assert!(err.contains(".config/powerline-claude/themes"), "{err}");
+}
+
 #[test]
 fn mocha_cost_colors_match_vendored_palette() {
     let colors = Theme::default().family(Family::Cost);

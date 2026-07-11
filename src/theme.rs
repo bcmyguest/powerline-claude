@@ -8,7 +8,9 @@
 //! A custom theme is a directory containing a `theme.yaml` with any subset
 //! of the eight families below (each an optional `fg`/`bg` hex pair);
 //! anything left unspecified falls back to the catppuccin-mocha value for
-//! that slot.
+//! that slot. `--theme` accepts an explicit path to such a directory, or a
+//! bare name that resolves against `~/.config/powerline-claude/themes/<name>`
+//! when it isn't a built-in palette.
 
 use std::path::Path;
 
@@ -78,6 +80,10 @@ impl Family {
         Family::Cost,
     ];
 }
+
+/// Where bare theme names resolve when they aren't built-in palettes,
+/// relative to `$HOME`.
+const CONFIG_THEMES_DIR: &str = ".config/powerline-claude/themes";
 
 /// Const constructor for palette entries: `(fg, bg)` as hex words.
 const fn sc(fg: u32, bg: u32) -> SegmentColors {
@@ -236,22 +242,35 @@ impl Theme {
         }
     }
 
+    /// Built-in palette by name, or an explicit theme-directory path. See
+    /// `resolve` for the full lookup including the user config directory.
     pub fn by_name(name: &str) -> Result<Self, String> {
+        Self::resolve(name, "")
+    }
+
+    /// Full theme lookup: an existing directory path wins, then a built-in
+    /// palette name, then `<home>/.config/powerline-claude/themes/<name>`
+    /// (skipped when `home` is empty).
+    pub fn resolve(name: &str, home: &str) -> Result<Self, String> {
         let path = Path::new(name);
         if path.is_dir() {
             return Self::from_dir(path);
         }
-        PALETTES
-            .iter()
-            .find(|palette| palette.name == name)
-            .map(Self::from_preset)
-            .ok_or_else(|| {
-                let available: Vec<&str> = Self::builtin_names().collect();
-                format!(
-                    "unknown theme '{name}', available: {}",
-                    available.join(", ")
-                )
-            })
+        if let Some(preset) = PALETTES.iter().find(|palette| palette.name == name) {
+            return Ok(Self::from_preset(preset));
+        }
+        if !home.is_empty() {
+            let config_dir = Path::new(home).join(CONFIG_THEMES_DIR).join(name);
+            if config_dir.is_dir() {
+                return Self::from_dir(&config_dir);
+            }
+        }
+        let available: Vec<&str> = Self::builtin_names().collect();
+        Err(format!(
+            "unknown theme '{name}', available: {}, a theme directory path, \
+             or a directory name under ~/{CONFIG_THEMES_DIR}",
+            available.join(", ")
+        ))
     }
 
     /// Names of the vendored palettes, in listing order.

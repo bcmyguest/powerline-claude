@@ -11,6 +11,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::payload::Payload;
+use crate::render::Mode;
 use crate::theme::{Family, SegmentColors, Theme};
 
 const LOGO: &str = "\u{f4f5}";
@@ -19,12 +20,37 @@ const SONNET_ICON: char = '\u{f06a9}';
 const OPUS_ICON: char = '\u{f16a6}';
 const BRANCH_ICON: char = '\u{e0a0}';
 
+// Compatible mode promises a bar that renders without a patched font, so the
+// nerd-font glyphs above get plain-Unicode stand-ins (and the model segment
+// simply drops its icon).
+const LOGO_COMPAT: &str = "\u{2733}"; // ✳
+const BRANCH_ICON_COMPAT: char = '\u{2387}'; // ⎇
+
+fn logo(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Compatible => LOGO_COMPAT,
+        _ => LOGO,
+    }
+}
+
+fn branch_icon(mode: Mode) -> char {
+    match mode {
+        Mode::Compatible => BRANCH_ICON_COMPAT,
+        _ => BRANCH_ICON,
+    }
+}
+
 /// Terminals narrower than this get a more aggressive dir truncation.
 const NARROW_COLUMNS: usize = 80;
 
 /// Context tokens at which the context segment turns orange, then red.
 pub const CONTEXT_WARN_TOKENS: u64 = 80_000;
 pub const CONTEXT_ALERT_TOKENS: u64 = 125_000;
+
+/// Remaining rate-limit budget (percent left in the tightest window) below
+/// which the usage segment turns orange, then red.
+pub const USAGE_WARN_REMAINING: f64 = 20.0;
+pub const USAGE_ALERT_REMAINING: f64 = 5.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Module {
@@ -49,8 +75,9 @@ struct ModuleSpec {
     /// use one family for both; stats, effort, and usage have no family of
     /// their own and borrow: stats paints the cost fg on the context bg
     /// (keeping the alternating-bg rhythm), effort paints as model, usage as
-    /// cost. Context's row is its calm state — past the token thresholds it
-    /// swaps to the warn/alert families (see `Module::colors`).
+    /// cost. The context and usage rows are their calm states — past the
+    /// token / remaining-budget thresholds they swap to the warn/alert
+    /// families (see `Module::colors`).
     fg: Family,
     bg: Family,
 }
@@ -133,14 +160,19 @@ impl Module {
     }
 
     /// This module's colors under `theme`, per its registry families.
-    /// Context is the one payload-dependent module: past the token
-    /// thresholds it paints with the warn/alert families instead of its
-    /// registry row, which is why the current token count comes along.
-    pub fn colors(self, theme: &Theme, context_tokens: Option<u64>) -> SegmentColors {
+    /// Context and usage are the payload-dependent modules: past the token
+    /// thresholds (context) or below the remaining-budget thresholds (usage)
+    /// they paint with the warn/alert families instead of their registry
+    /// rows, which is why the payload comes along.
+    pub fn colors(self, theme: &Theme, payload: &Payload) -> SegmentColors {
         let spec = self.spec();
         let (fg, bg) = match self {
             Module::Context => {
-                let family = context_family(context_tokens);
+                let family = context_family(payload.current_tokens());
+                (family, family)
+            }
+            Module::Usage => {
+                let family = usage_family(payload.five_hour_used(), payload.seven_day_used());
                 (family, family)
             }
             _ => (spec.fg, spec.bg),
@@ -186,8 +218,11 @@ pub fn parse_modules(list: &str) -> Result<Vec<Module>, String> {
         .collect()
 }
 
-pub fn format_model(display_name: &str) -> String {
+pub fn format_model(display_name: &str, mode: Mode) -> String {
     let name = display_name.to_lowercase();
+    if mode == Mode::Compatible {
+        return name;
+    }
     let icon = if name.contains("haiku") {
         HAIKU_ICON
     } else if name.contains("opus") {
@@ -231,23 +266,71 @@ pub fn context_family(tokens: Option<u64>) -> Family {
     }
 }
 
+/// One subscription rate-limit window as the payload reports it.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct UsageWindow {
+    pub used_percentage: Option<f64>,
+    /// Unix timestamp (seconds) at which the window resets.
+    pub resets_at: Option<i64>,
+}
+
 /// Remaining subscription rate-limit budget, from the used percentages the
-/// payload reports per window: `5h 77% · 7d 59%`. Windows absent from the
+/// payload reports per window, plus the time until each window resets when
+/// the clock is known: `5h 77% (2h) · 7d 59% (5d)`. Windows absent from the
 /// payload are dropped; no windows at all means no segment.
-pub fn format_usage(five_hour_used: Option<f64>, seven_day_used: Option<f64>) -> Option<String> {
-    let remaining =
-        |used: Option<f64>| used.map(|percent| (100.0 - percent).clamp(0.0, 100.0).round());
-    let parts: Vec<String> = [
-        ("5h", remaining(five_hour_used)),
-        ("7d", remaining(seven_day_used)),
-    ]
-    .into_iter()
-    .filter_map(|(label, left)| left.map(|left| format!("{label} {left:.0}%")))
-    .collect();
+pub fn format_usage(
+    five_hour: UsageWindow,
+    seven_day: UsageWindow,
+    now: Option<i64>,
+) -> Option<String> {
+    let parts: Vec<String> = [("5h", five_hour), ("7d", seven_day)]
+        .into_iter()
+        .filter_map(|(label, window)| usage_part(label, window, now))
+        .collect();
     if parts.is_empty() {
         None
     } else {
         Some(parts.join(" · "))
+    }
+}
+
+fn usage_part(label: &str, window: UsageWindow, now: Option<i64>) -> Option<String> {
+    let remaining = (100.0 - window.used_percentage?).clamp(0.0, 100.0).round();
+    let mut part = format!("{label} {remaining:.0}%");
+    if let (Some(resets_at), Some(now)) = (window.resets_at, now)
+        && resets_at > now
+    {
+        let _ = write!(part, " ({})", format_reset(resets_at - now));
+    }
+    Some(part)
+}
+
+/// Coarse time-until-reset: whole days, else whole hours, else minutes.
+fn format_reset(seconds: i64) -> String {
+    let minutes = seconds / 60;
+    if minutes >= 24 * 60 {
+        format!("{}d", minutes / (24 * 60))
+    } else if minutes >= 60 {
+        format!("{}h", minutes / 60)
+    } else {
+        format!("{}m", minutes.max(1))
+    }
+}
+
+/// Which family paints the usage segment: its registry row (cost) normally,
+/// warn/alert when the tightest reported window is nearly spent.
+pub fn usage_family(five_hour_used: Option<f64>, seven_day_used: Option<f64>) -> Family {
+    let least_remaining = [five_hour_used, seven_day_used]
+        .into_iter()
+        .flatten()
+        .map(|used| (100.0 - used).clamp(0.0, 100.0))
+        .fold(f64::INFINITY, f64::min);
+    if least_remaining < USAGE_ALERT_REMAINING {
+        Family::ContextAlert
+    } else if least_remaining < USAGE_WARN_REMAINING {
+        Family::ContextWarn
+    } else {
+        Family::Cost
     }
 }
 
@@ -317,18 +400,32 @@ pub fn segment_texts(
     modules: &[Module],
     columns: usize,
     home: &str,
+    mode: Mode,
+    now: Option<i64>,
 ) -> Vec<(Module, String)> {
     modules
         .iter()
         .filter_map(|module| {
             let text = match module {
-                Module::Logo => Some(LOGO.to_string()),
+                Module::Logo => Some(logo(mode).to_string()),
                 Module::Dir => payload.dir().map(|dir| truncate_dir(dir, home, columns)),
-                Module::Git => git_segment(payload),
-                Module::Model => payload.model_display_name().map(format_model),
+                Module::Git => git_segment(payload, mode),
+                Module::Model => payload
+                    .model_display_name()
+                    .map(|name| format_model(name, mode)),
                 Module::Context => Some(format_tokens(payload.current_tokens())),
                 Module::Cost => payload.total_cost_usd().map(format_cost),
-                Module::Usage => format_usage(payload.five_hour_used(), payload.seven_day_used()),
+                Module::Usage => format_usage(
+                    UsageWindow {
+                        used_percentage: payload.five_hour_used(),
+                        resets_at: payload.five_hour_resets_at(),
+                    },
+                    UsageWindow {
+                        used_percentage: payload.seven_day_used(),
+                        resets_at: payload.seven_day_resets_at(),
+                    },
+                    now,
+                ),
                 Module::Stats => payload.total_duration_ms().map(format_duration),
                 Module::Effort => payload.effort_level().map(str::to_string),
             };
@@ -339,9 +436,9 @@ pub fn segment_texts(
 
 /// Branch plus the session's line churn: ` main +156 -23`. Lines come from
 /// the payload (what Claude changed), not from a git diff.
-fn git_segment(payload: &Payload) -> Option<String> {
+fn git_segment(payload: &Payload, mode: Mode) -> Option<String> {
     let branch = git_branch(Path::new(payload.dir()?))?;
-    let mut text = format!("{BRANCH_ICON} {branch}");
+    let mut text = format!("{} {branch}", branch_icon(mode));
     if let (Some(added), Some(removed)) = (payload.lines_added(), payload.lines_removed()) {
         let _ = write!(text, " +{added} -{removed}");
     }

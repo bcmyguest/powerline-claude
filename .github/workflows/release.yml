@@ -1,13 +1,15 @@
 name: release
 
-# Every merge to main cuts a release: git-cliff computes the next semver from
-# the conventional commits since the last tag, the workflow pushes that
-# vX.Y.Z tag, builds the static musl binary, publishes a GitHub release
-# with git-cliff release notes, and pushes the crate to crates.io via Trusted
-# Publishing (OIDC; the crate on crates.io must list this repo + release.yml
-# as a trusted publisher, or the publish step fails the run). If nothing
-# releasable landed (only unconventional or chore(release) commits), the
-# bumped version equals the latest tag and the run exits early.
+# Every merge to main cuts a release: the plan job asks git-cliff for the
+# next semver from the conventional commits since the last tag and runs the
+# test suite; the build matrix produces a static binary per supported target;
+# the release job pushes the vX.Y.Z tag, publishes a GitHub release with
+# git-cliff release notes and every binary attached, and pushes the crate to
+# crates.io via Trusted Publishing (OIDC; the crate on crates.io must list
+# this repo + release.yml as a trusted publisher, or the publish step fails
+# the run). If nothing releasable landed (only unconventional or
+# chore(release) commits), the bumped version equals the latest tag and the
+# run exits early.
 #
 # Manual runs (workflow_dispatch) skip the release half and only (re)publish
 # the latest existing tag to crates.io — e.g. to backfill a version whose
@@ -32,8 +34,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  # Decides what this run does (release, republish, or nothing), tests the
+  # code, and renders the release notes the release job attaches later.
+  plan:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      release: ${{ steps.bump.outputs.release }}
+      skip: ${{ steps.bump.outputs.skip }}
+      already: ${{ steps.published.outputs.already }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,10 +102,9 @@ jobs:
             echo "already=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Manual runs publish the tagged code, not whatever main has moved to.
-      - name: Check out the tag
-        if: steps.bump.outputs.release == 'false' && steps.bump.outputs.skip == 'false'
-        run: git checkout "refs/tags/${{ steps.bump.outputs.version }}"
+      - name: Test
+        if: steps.bump.outputs.release == 'true'
+        run: cargo test --locked
 
       - name: Render release notes
         if: steps.bump.outputs.release == 'true'
@@ -104,48 +112,124 @@ jobs:
           git cliff --unreleased --tag "${{ steps.bump.outputs.version }}" -o release-notes.md
           cat release-notes.md
 
-      - name: Install musl target
+      - name: Upload release notes
         if: steps.bump.outputs.release == 'true'
-        run: |
-          sudo apt-get update && sudo apt-get install -y musl-tools
-          rustup target add x86_64-unknown-linux-musl
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
 
-      - name: Test
-        if: steps.bump.outputs.release == 'true'
-        run: cargo test --locked
+  # One static binary per supported target. Linux builds run natively on
+  # x64/arm64 runners against musl; both macOS targets build on the arm64
+  # runner (the Apple toolchain cross-compiles x86_64 with just the added
+  # rust target).
+  build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
 
-      # After Test, which runs --locked and would reject the stale Cargo.lock
-      # this edit leaves behind (cargo publish regenerates it).
+      # perl, not sed -i: the in-place flag differs between GNU and BSD sed
+      # and this step runs on both Linux and macOS.
       - name: Stamp crate version
-        if: steps.bump.outputs.skip == 'false'
         run: |
-          version="${{ steps.bump.outputs.version }}"
-          sed -i "s/^version = \".*\"/version = \"${version#v}\"/" Cargo.toml
+          version="${{ needs.plan.outputs.version }}"
+          perl -pi -e "s/^version = \".*\"/version = \"${version#v}\"/" Cargo.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build static binary
-        if: steps.bump.outputs.release == 'true'
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl
+          cargo build --release --target ${{ matrix.target }}
           mkdir -p release
-          cp target/x86_64-unknown-linux-musl/release/powerline-claude \
-            release/powerline-claude-x86_64-unknown-linux-musl
+          cp "target/${{ matrix.target }}/release/powerline-claude" \
+            "release/powerline-claude-${{ matrix.target }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: release/*
+          if-no-files-found: error
+
+  # Tags, publishes the GitHub release with every binary, and pushes the
+  # crate to crates.io. Also the entire back half of a manual republish run,
+  # where the build matrix is skipped.
+  release:
+    needs: [plan, build]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      needs.plan.outputs.skip == 'false' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Manual runs publish the tagged code, not whatever main has moved to.
+      - name: Check out the tag
+        if: needs.plan.outputs.release == 'false'
+        run: git checkout "refs/tags/${{ needs.plan.outputs.version }}"
+
+      - name: Download binaries
+        if: needs.plan.outputs.release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: release
+          merge-multiple: true
+
+      - name: Download release notes
+        if: needs.plan.outputs.release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Checksums
+        if: needs.plan.outputs.release == 'true'
+        run: |
           cd release
           sha256sum * > checksums.txt
           ls -l
 
       - name: Push tag
-        if: steps.bump.outputs.release == 'true'
+        if: needs.plan.outputs.release == 'true'
         run: |
-          git tag "${{ steps.bump.outputs.version }}"
-          git push origin "${{ steps.bump.outputs.version }}"
+          git tag "${{ needs.plan.outputs.version }}"
+          git push origin "${{ needs.plan.outputs.version }}"
 
       - name: Publish release
-        if: steps.bump.outputs.release == 'true'
+        if: needs.plan.outputs.release == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.bump.outputs.version }}
+          tag_name: ${{ needs.plan.outputs.version }}
           body_path: release-notes.md
           files: release/*
+
+      - name: Stamp crate version
+        if: needs.plan.outputs.already == 'false'
+        run: |
+          version="${{ needs.plan.outputs.version }}"
+          sed -i "s/^version = \".*\"/version = \"${version#v}\"/" Cargo.toml
 
       # Exchanges the run's OIDC identity for a short-lived crates.io token
       # (Trusted Publishing — no long-lived secret). Fails the run if the
@@ -154,13 +238,13 @@ jobs:
       # registering the publisher and re-running via workflow_dispatch.
       - name: Authenticate with crates.io
         id: crates-auth
-        if: steps.bump.outputs.skip == 'false' && steps.published.outputs.already == 'false'
+        if: needs.plan.outputs.already == 'false'
         uses: rust-lang/crates-io-auth-action@v1
 
       # Publishes the crate with the same stamped version as the tag.
       # --allow-dirty because the version stamp above edits Cargo.toml in place.
       - name: Publish to crates.io
-        if: steps.bump.outputs.skip == 'false' && steps.published.outputs.already == 'false'
+        if: needs.plan.outputs.already == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: cargo publish --allow-dirty
