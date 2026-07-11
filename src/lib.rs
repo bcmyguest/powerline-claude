@@ -66,25 +66,40 @@ pub fn run(
     let mode: render::Mode = cli.mode.parse()?;
     let width = resolve_width(cli.width, env.columns.as_deref(), tty_width);
 
-    let build = |modules: &[segments::Module]| -> Vec<Segment> {
-        segments::segment_texts(&payload, modules, width, &env.home, mode, env.now)
-            .into_iter()
+    let build = |texts: &[(segments::Module, String)]| -> Vec<Segment> {
+        texts
+            .iter()
             .map(|(module, text)| Segment {
-                text,
+                text: text.clone(),
                 colors: module.colors(&theme, &payload),
             })
             .collect()
     };
 
-    let left_bar = render::render(&build(&modules), mode);
-    let right_segments = build(&modules_right);
-    let bar = if right_segments.is_empty() {
+    let mut left = segments::segment_texts(&payload, &modules, width, &env.home, mode, env.now);
+    let mut right =
+        segments::segment_texts(&payload, &modules_right, width, &env.home, mode, env.now);
+
+    // Adaptive overflow: when the bar is wider than the terminal, shed the
+    // lowest-priority segments (wherever they sit) until it fits, always
+    // keeping at least one.
+    let (left_bar, right_bar) = loop {
+        let left_bar = render::render(&build(&left), mode);
+        let right_bar = render::render_right(&build(&right), mode);
+        let used = render::visible_width(&left_bar)
+            + render::visible_width(&right_bar)
+            + usize::from(!right.is_empty()); // minimum gap before a right bar
+        if used <= width || left.len() + right.len() <= 1 || !drop_lowest(&mut left, &mut right) {
+            break (left_bar, right_bar);
+        }
+    };
+
+    let bar = if right_bar.is_empty() {
         left_bar
     } else {
         // Pad the gap so the right bar ends at the terminal edge; when the
         // two sides don't fit, keep at least one space between them and let
         // the terminal do what it will.
-        let right_bar = render::render_right(&right_segments, mode);
         let used = render::visible_width(&left_bar) + render::visible_width(&right_bar);
         let gap = width.saturating_sub(used).max(1);
         format!("{left_bar}{}{right_bar}", " ".repeat(gap))
@@ -97,6 +112,36 @@ pub fn run(
     };
 
     Ok(Output { bar, progress })
+}
+
+/// Remove the lowest-priority segment across both sides of the bar (left
+/// wins a tie). Returns false when there is nothing left to drop.
+fn drop_lowest(
+    left: &mut Vec<(segments::Module, String)>,
+    right: &mut Vec<(segments::Module, String)>,
+) -> bool {
+    let lowest = |texts: &[(segments::Module, String)]| {
+        texts
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (module, _))| module.priority())
+            .map(|(index, (module, _))| (module.priority(), index))
+    };
+    match (lowest(left), lowest(right)) {
+        (Some((lp, _)), Some((rp, ri))) if rp < lp => {
+            right.remove(ri);
+            true
+        }
+        (Some((_, li)), _) => {
+            left.remove(li);
+            true
+        }
+        (None, Some((_, ri))) => {
+            right.remove(ri);
+            true
+        }
+        (None, None) => false,
+    }
 }
 
 /// Terminal width precedence: explicit flag, then `$COLUMNS`, then the

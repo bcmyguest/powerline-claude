@@ -86,7 +86,7 @@ Flags go on that command string:
 | `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, a path to a [custom theme directory](#custom-themes), or the name of one under `~/.config/powerline-claude/themes/` |
 | `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain-Unicode separators and segment icons — no patched font needed), `flat` (no separators) |
 | `--no-progress` | off | Suppress the OSC 9;4 terminal progress bar |
-| `--width` | `$COLUMNS`, then parent TTY, then 200 | Terminal width (drives dir truncation) |
+| `--width` | `$COLUMNS`, then parent TTY, then 200 | Terminal width (drives dir truncation, compact token counts, and overflow segment dropping) |
 
 ## Custom themes
 
@@ -143,11 +143,14 @@ built-in palettes.
 - `dir` — workspace dir, last two path components (one below 80 columns)
 - `git` — current branch (read from `.git/HEAD`, worktree-aware) plus the
   session's `+added -removed` line counts from the payload (`⎇` branch
-  icon in compatible mode)
+  icon in compatible mode); an in-progress operation — `(merging)`,
+  `(rebasing)`, `(cherry-picking)`, `(reverting)`, `(bisecting)` — shows
+  after the branch and paints the segment with the `context_warn` family
 - `model` — nerd icon + lowercased model name (no icon in compatible mode)
-- `context` — exact tokens in the context window (`150,697 tok`), `~~ tok`
-  before the first API call; turns orange at 80k tokens and red at 125k
-  (the `context_warn`/`context_alert` theme families)
+- `context` — exact tokens in the context window (`150,697 tok`; compacted
+  to `150.7k tok` below 80 columns), `~~ tok` before the first API call;
+  turns orange at 80k tokens and red at 125k (the
+  `context_warn`/`context_alert` theme families)
 - `cost` — session cost, `$X.XX`
 - `usage` — remaining subscription rate-limit budget (`5h 77% (2h) · 7d 59% (5d)`:
   what's left of the rolling 5-hour and 7-day windows and how long until each
@@ -159,6 +162,12 @@ built-in palettes.
 
 Segments whose data is absent from the payload disappear rather than render
 placeholders (except `context`, which shows `~~` like the old bar did).
+
+When the bar is wider than the terminal, the least important segments are
+dropped until it fits (at least one always survives). Drop order: `logo`,
+`stats`, `effort`, `cost`, `usage`, `model`, `git`, `dir`, `context`.
+
+![the bar shedding segments as the terminal narrows](docs/small-screens.png)
 
 The OSC 9;4 progress bar mirrors context usage: green below 40%, yellow to
 60%, red above, full at the 80% compact threshold.

@@ -4,7 +4,7 @@ use powerline_claude::payload::Payload;
 use powerline_claude::render::Mode;
 use powerline_claude::segments::{
     Module, UsageWindow, context_family, format_cost, format_duration, format_model, format_tokens,
-    format_usage, git_branch, parse_modules, segment_texts, truncate_dir, usage_family,
+    format_usage, git_branch, git_state, parse_modules, segment_texts, truncate_dir, usage_family,
 };
 use powerline_claude::theme::{Family, Rgb, Theme};
 
@@ -93,15 +93,27 @@ fn flat_mode_keeps_the_nerd_model_icon() {
 
 #[test]
 fn tokens_render_with_thousands_separators() {
-    assert_eq!(format_tokens(Some(15500)), "15,500 tok");
-    assert_eq!(format_tokens(Some(1_234_567)), "1,234,567 tok");
-    assert_eq!(format_tokens(Some(999)), "999 tok");
+    assert_eq!(format_tokens(Some(15500), 200), "15,500 tok");
+    assert_eq!(format_tokens(Some(1_234_567), 200), "1,234,567 tok");
+    assert_eq!(format_tokens(Some(999), 200), "999 tok");
+}
+
+#[test]
+fn narrow_terminals_compact_the_token_count() {
+    assert_eq!(format_tokens(Some(15_500), 79), "15.5k tok");
+    assert_eq!(format_tokens(Some(80_000), 79), "80k tok");
+    assert_eq!(format_tokens(Some(124_300), 79), "124.3k tok");
+    assert_eq!(format_tokens(Some(1_234_567), 79), "1.2M tok");
+    assert_eq!(format_tokens(Some(999), 79), "999 tok");
+    // 80 columns is not narrow
+    assert_eq!(format_tokens(Some(15_500), 80), "15,500 tok");
 }
 
 #[test]
 fn missing_or_zero_tokens_render_placeholder() {
-    assert_eq!(format_tokens(None), "~~ tok");
-    assert_eq!(format_tokens(Some(0)), "~~ tok");
+    assert_eq!(format_tokens(None, 200), "~~ tok");
+    assert_eq!(format_tokens(Some(0), 200), "~~ tok");
+    assert_eq!(format_tokens(None, 79), "~~ tok");
 }
 
 // --- context thresholds ---
@@ -315,6 +327,66 @@ fn no_repository_means_no_branch() {
     assert_eq!(git_branch(dir.path()), None);
 }
 
+// --- git in-progress state (marker files next to HEAD, no subprocess) ---
+
+#[test]
+fn clean_repository_has_no_state() {
+    let repo = tempdir_repo("main");
+    assert_eq!(git_state(repo.path()), None);
+}
+
+#[test]
+fn merge_head_means_merging() {
+    let repo = tempdir_repo("main");
+    fs::write(repo.path().join(".git/MERGE_HEAD"), "abc123\n").unwrap();
+    assert_eq!(git_state(repo.path()), Some("merging"));
+}
+
+#[test]
+fn rebase_dirs_mean_rebasing() {
+    let repo = tempdir_repo("main");
+    fs::create_dir(repo.path().join(".git/rebase-merge")).unwrap();
+    assert_eq!(git_state(repo.path()), Some("rebasing"));
+
+    let repo = tempdir_repo("main");
+    fs::create_dir(repo.path().join(".git/rebase-apply")).unwrap();
+    assert_eq!(git_state(repo.path()), Some("rebasing"));
+}
+
+#[test]
+fn cherry_pick_revert_and_bisect_are_detected() {
+    let repo = tempdir_repo("main");
+    fs::write(repo.path().join(".git/CHERRY_PICK_HEAD"), "abc\n").unwrap();
+    assert_eq!(git_state(repo.path()), Some("cherry-picking"));
+
+    let repo = tempdir_repo("main");
+    fs::write(repo.path().join(".git/REVERT_HEAD"), "abc\n").unwrap();
+    assert_eq!(git_state(repo.path()), Some("reverting"));
+
+    let repo = tempdir_repo("main");
+    fs::write(repo.path().join(".git/BISECT_LOG"), "git bisect start\n").unwrap();
+    assert_eq!(git_state(repo.path()), Some("bisecting"));
+}
+
+#[test]
+fn worktree_state_is_read_from_the_worktree_gitdir() {
+    // merge markers for a linked worktree live in its private gitdir, not
+    // the main repo's .git
+    let main = tempfile::tempdir().unwrap();
+    let gitdir = main.path().join("repo/.git/worktrees/wt");
+    fs::create_dir_all(&gitdir).unwrap();
+    fs::write(gitdir.join("HEAD"), "ref: refs/heads/wt-branch\n").unwrap();
+    fs::write(gitdir.join("MERGE_HEAD"), "abc\n").unwrap();
+
+    let worktree = tempfile::tempdir().unwrap();
+    fs::write(
+        worktree.path().join(".git"),
+        format!("gitdir: {}\n", gitdir.display()),
+    )
+    .unwrap();
+    assert_eq!(git_state(worktree.path()), Some("merging"));
+}
+
 // --- module list parsing ---
 
 #[test]
@@ -378,6 +450,42 @@ fn git_segment_appends_churn_when_both_line_counts_exist() {
         texts,
         vec![(Module::Git, "\u{e0a0} main +5 -2".to_string())]
     );
+}
+
+#[test]
+fn git_segment_shows_the_in_progress_state_between_branch_and_churn() {
+    let repo = tempdir_repo("main");
+    fs::write(repo.path().join(".git/MERGE_HEAD"), "abc\n").unwrap();
+    let p = payload(&format!(
+        r#"{{"workspace": {{"current_dir": "{}"}},
+             "cost": {{"total_lines_added": 5, "total_lines_removed": 2}}}}"#,
+        repo.path().display()
+    ));
+    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user", Mode::Patched, None);
+    assert_eq!(
+        texts,
+        vec![(Module::Git, "\u{e0a0} main (merging) +5 -2".to_string())]
+    );
+}
+
+#[test]
+fn overflow_priorities_shed_decoration_before_information() {
+    // context survives longest, the logo goes first
+    let by_priority = |module: Module| module.priority();
+    assert!(
+        Module::default_order()
+            .into_iter()
+            .all(|m| by_priority(m) >= by_priority(Module::Logo))
+    );
+    assert!(
+        Module::default_order()
+            .into_iter()
+            .all(|m| by_priority(m) <= by_priority(Module::Context))
+    );
+    assert!(by_priority(Module::Stats) < by_priority(Module::Cost));
+    assert!(by_priority(Module::Effort) < by_priority(Module::Usage));
+    assert!(by_priority(Module::Model) < by_priority(Module::Git));
+    assert!(by_priority(Module::Git) < by_priority(Module::Dir));
 }
 
 #[test]

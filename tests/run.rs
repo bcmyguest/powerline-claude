@@ -121,7 +121,41 @@ fn modules_right_pads_the_bar_to_the_terminal_width() {
 }
 
 #[test]
-fn modules_right_keeps_one_space_when_the_bar_overflows() {
+fn overflow_drops_the_lowest_priority_segment_until_the_bar_fits() {
+    // flat widths: logo " ✳ " = 3, model " <icon> opus 4.8 " = 12; at 14
+    // columns the logo (lowest priority) is shed and the model kept
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &["--modules", "logo,model", "--mode", "flat", "--width", "14"],
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " \u{f16a6} opus 4.8 ");
+}
+
+#[test]
+fn overflow_sheds_across_both_sides_of_the_bar() {
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &[
+            "--modules",
+            "model",
+            "--modules-right",
+            "logo",
+            "--mode",
+            "flat",
+            "--width",
+            "14",
+        ],
+    )
+    .unwrap();
+    // the right-side logo is lower priority than the left-side model
+    assert_eq!(strip_ansi(&out.bar), " \u{f16a6} opus 4.8 ");
+}
+
+#[test]
+fn overflow_never_drops_the_last_segment_and_keeps_one_space() {
+    // 5 columns fit nothing: the logo is shed, the model survives as the
+    // final segment even though it still overflows
     let out = run_fixture(
         include_str!("fixtures/full.json"),
         &[
@@ -136,7 +170,7 @@ fn modules_right_keeps_one_space_when_the_bar_overflows() {
         ],
     )
     .unwrap();
-    assert_eq!(strip_ansi(&out.bar), " \u{f4f5}   \u{f16a6} opus 4.8 ");
+    assert_eq!(strip_ansi(&out.bar), "  \u{f16a6} opus 4.8 ");
 }
 
 #[test]
@@ -252,6 +286,45 @@ fn unknown_module_is_a_readable_error() {
 #[test]
 fn garbage_payload_is_an_error_not_a_panic() {
     assert!(run_fixture("not json", &[]).is_err());
+}
+
+#[test]
+fn merge_in_progress_shows_in_the_git_segment_with_the_warn_background() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir(repo.path().join(".git")).unwrap();
+    std::fs::write(repo.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(repo.path().join(".git/MERGE_HEAD"), "abc123\n").unwrap();
+    let payload = format!(
+        r#"{{"workspace": {{"current_dir": "{}"}}}}"#,
+        repo.path().display()
+    );
+    let out = run(
+        &payload,
+        &cli(&["--modules", "git", "--mode", "flat"]),
+        &env(),
+        || None,
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " \u{e0a0} main (merging) ");
+    // catppuccin-mocha context_warn bg: #fab387
+    assert!(out.bar.contains("\x1b[48;2;250;179;135m"), "{:?}", out.bar);
+}
+
+#[test]
+fn narrow_terminals_compact_the_context_token_count_through_run() {
+    let narrow = Env {
+        home: "/home/user".to_string(),
+        columns: Some("79".to_string()),
+        now: None,
+    };
+    let out = run(
+        include_str!("fixtures/full.json"),
+        &cli(&["--modules", "context", "--mode", "flat"]),
+        &narrow,
+        || None,
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " 15.5k tok ");
 }
 
 #[test]
