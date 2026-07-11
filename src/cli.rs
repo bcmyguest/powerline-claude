@@ -3,6 +3,8 @@
 
 use clap::Parser;
 
+use crate::segments::Module;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "powerline-claude",
@@ -10,7 +12,7 @@ use clap::Parser;
 )]
 pub struct Cli {
     /// Comma-separated segments to render, in order
-    #[arg(long, default_value = "logo,dir,git,model,context,cost,stats,effort")]
+    #[arg(long, default_value_t = Module::default_list())]
     pub modules: String,
 
     /// Color theme

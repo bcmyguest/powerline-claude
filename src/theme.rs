@@ -1,10 +1,9 @@
 //! Color themes, ported from the starship-claude palette files.
 //!
 //! A palette defines fg/bg pairs per semantic family (claude, directory, git,
-//! model, context, cost). The two segments that have no upstream family
-//! (stats, effort) reuse existing families so every theme stays coherent:
-//! stats renders with the cost fg on the context bg, effort with the model
-//! colors.
+//! model, context, cost). Which family paints which segment is the segment
+//! registry's business (`segments::MODULES`) — this module only resolves
+//! `Family` to colors.
 //!
 //! A custom theme is a directory containing a `theme.yaml` with any subset
 //! of the six families below (each an optional `fg`/`bg` hex pair); anything
@@ -48,18 +47,6 @@ impl Rgb {
 pub struct SegmentColors {
     pub fg: Rgb,
     pub bg: Rgb,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SegmentKind {
-    Logo,
-    Dir,
-    Git,
-    Model,
-    Context,
-    Cost,
-    Stats,
-    Effort,
 }
 
 /// One semantic color family: what a palette (and a custom `theme.yaml`)
@@ -283,21 +270,5 @@ impl Theme {
     /// The resolved fg/bg pair for one family.
     pub fn family(&self, family: Family) -> SegmentColors {
         self.colors[family as usize]
-    }
-
-    pub fn colors(&self, kind: SegmentKind) -> SegmentColors {
-        match kind {
-            SegmentKind::Logo => self.family(Family::Claude),
-            SegmentKind::Dir => self.family(Family::Directory),
-            SegmentKind::Git => self.family(Family::Git),
-            SegmentKind::Model => self.family(Family::Model),
-            SegmentKind::Context => self.family(Family::Context),
-            SegmentKind::Cost => self.family(Family::Cost),
-            SegmentKind::Stats => SegmentColors {
-                fg: self.family(Family::Cost).fg,
-                bg: self.family(Family::Context).bg,
-            },
-            SegmentKind::Effort => self.family(Family::Model),
-        }
     }
 }

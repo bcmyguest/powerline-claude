@@ -26,9 +26,9 @@ pub fn run(payload_json: &str, cli: &Cli) -> Result<String, String> {
 
     let segments: Vec<Segment> = segments::segment_texts(&payload, &modules, width)
         .into_iter()
-        .map(|(kind, text)| Segment {
+        .map(|(module, text)| Segment {
             text,
-            colors: theme.colors(kind),
+            colors: module.colors(&theme),
         })
         .collect();
     Ok(render::render(&segments, mode))

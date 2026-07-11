@@ -5,6 +5,30 @@ use powerline_claude::segments::{
     Module, format_cost, format_duration, format_model, format_tokens, git_branch, parse_modules,
     truncate_dir,
 };
+use powerline_claude::theme::{Rgb, Theme};
+
+// --- registry: colors ---
+
+#[test]
+fn stats_and_effort_borrow_palette_families() {
+    let theme = Theme::default(); // catppuccin-mocha
+    // stats: cost fg on the context bg (keeps the alternating-bg rhythm)
+    let stats = Module::Stats.colors(&theme);
+    assert_eq!(stats.fg, Rgb::hex(0xa6e3a1));
+    assert_eq!(stats.bg, Rgb::hex(0x313244));
+    // effort: model colors
+    let effort = Module::Effort.colors(&theme);
+    assert_eq!(effort.fg, Rgb::hex(0xb4befe));
+    assert_eq!(effort.bg, Rgb::hex(0x1e1e2e));
+}
+
+#[test]
+fn default_list_is_the_cli_default() {
+    assert_eq!(
+        Module::default_list(),
+        "logo,dir,git,model,context,cost,stats,effort"
+    );
+}
 
 // --- model ---
 
