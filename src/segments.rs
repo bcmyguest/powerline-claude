@@ -80,6 +80,9 @@ struct ModuleSpec {
     /// families (see `Module::colors`).
     fg: Family,
     bg: Family,
+    /// Keep order when the bar overflows the terminal: lower-priority
+    /// segments are dropped first until the bar fits (see `lib.rs::run`).
+    priority: u8,
 }
 
 /// The module registry. Table order is the default bar order; adding a
@@ -90,54 +93,63 @@ const MODULES: &[ModuleSpec] = &[
         name: "logo",
         fg: Family::Claude,
         bg: Family::Claude,
+        priority: 1,
     },
     ModuleSpec {
         module: Module::Dir,
         name: "dir",
         fg: Family::Directory,
         bg: Family::Directory,
+        priority: 8,
     },
     ModuleSpec {
         module: Module::Git,
         name: "git",
         fg: Family::Git,
         bg: Family::Git,
+        priority: 7,
     },
     ModuleSpec {
         module: Module::Model,
         name: "model",
         fg: Family::Model,
         bg: Family::Model,
+        priority: 6,
     },
     ModuleSpec {
         module: Module::Context,
         name: "context",
         fg: Family::Context,
         bg: Family::Context,
+        priority: 9,
     },
     ModuleSpec {
         module: Module::Cost,
         name: "cost",
         fg: Family::Cost,
         bg: Family::Cost,
+        priority: 4,
     },
     ModuleSpec {
         module: Module::Usage,
         name: "usage",
         fg: Family::Cost,
         bg: Family::Cost,
+        priority: 5,
     },
     ModuleSpec {
         module: Module::Stats,
         name: "stats",
         fg: Family::Cost,
         bg: Family::Context,
+        priority: 2,
     },
     ModuleSpec {
         module: Module::Effort,
         name: "effort",
         fg: Family::Model,
         bg: Family::Model,
+        priority: 3,
     },
 ];
 
@@ -160,10 +172,11 @@ impl Module {
     }
 
     /// This module's colors under `theme`, per its registry families.
-    /// Context and usage are the payload-dependent modules: past the token
-    /// thresholds (context) or below the remaining-budget thresholds (usage)
-    /// they paint with the warn/alert families instead of their registry
-    /// rows, which is why the payload comes along.
+    /// Context, usage, and git are the state-dependent modules: past the
+    /// token thresholds (context), below the remaining-budget thresholds
+    /// (usage), or during an in-progress repo operation (git, read from the
+    /// git dir like the branch is) they paint with the warn/alert families
+    /// instead of their registry rows, which is why the payload comes along.
     pub fn colors(self, theme: &Theme, payload: &Payload) -> SegmentColors {
         let spec = self.spec();
         let (fg, bg) = match self {
@@ -175,12 +188,25 @@ impl Module {
                 let family = usage_family(payload.five_hour_used(), payload.seven_day_used());
                 (family, family)
             }
+            Module::Git
+                if payload
+                    .dir()
+                    .is_some_and(|dir| git_state(Path::new(dir)).is_some()) =>
+            {
+                (Family::ContextWarn, Family::ContextWarn)
+            }
             _ => (spec.fg, spec.bg),
         };
         SegmentColors {
             fg: theme.family(fg).fg,
             bg: theme.family(bg).bg,
         }
+    }
+
+    /// Keep order when the bar overflows: the lowest-priority segment is
+    /// dropped first.
+    pub fn priority(self) -> u8 {
+        self.spec().priority
     }
 
     pub fn default_order() -> Vec<Module> {
@@ -233,11 +259,29 @@ pub fn format_model(display_name: &str, mode: Mode) -> String {
     format!("{icon} {name}")
 }
 
-pub fn format_tokens(tokens: Option<u64>) -> String {
+pub fn format_tokens(tokens: Option<u64>, columns: usize) -> String {
     match tokens {
+        Some(count) if count > 0 && columns < NARROW_COLUMNS => {
+            format!("{} tok", compact_number(count))
+        }
         Some(count) if count > 0 => format!("{} tok", group_thousands(count)),
         _ => "~~ tok".to_string(),
     }
+}
+
+/// `15.5k` / `1.2M`-style count for narrow terminals, one decimal with a
+/// trailing `.0` trimmed.
+fn compact_number(value: u64) -> String {
+    let (scaled, unit) = if value >= 1_000_000 {
+        (value as f64 / 1_000_000.0, "M")
+    } else if value >= 1_000 {
+        (value as f64 / 1_000.0, "k")
+    } else {
+        return value.to_string();
+    };
+    let text = format!("{scaled:.1}");
+    let trimmed = text.strip_suffix(".0").unwrap_or(&text);
+    format!("{trimmed}{unit}")
 }
 
 fn group_thousands(value: u64) -> String {
@@ -366,16 +410,43 @@ pub fn truncate_dir(path: &str, home: &str, columns: usize) -> String {
 /// Current branch, read straight from `.git/HEAD`, walking up from `dir` and
 /// following worktree gitfiles. Detached HEAD yields the short hash.
 pub fn git_branch(dir: &Path) -> Option<String> {
+    branch_from_head(&git_head_dir(dir)?.join("HEAD"))
+}
+
+/// In-progress repository operation, detected from the marker files git
+/// leaves next to `HEAD` (in a linked worktree that's the worktree's own
+/// gitdir, where these markers live). A handful of stat calls, no
+/// subprocess.
+pub fn git_state(dir: &Path) -> Option<&'static str> {
+    let gitdir = git_head_dir(dir)?;
+    if gitdir.join("rebase-merge").is_dir() || gitdir.join("rebase-apply").is_dir() {
+        Some("rebasing")
+    } else if gitdir.join("MERGE_HEAD").is_file() {
+        Some("merging")
+    } else if gitdir.join("CHERRY_PICK_HEAD").is_file() {
+        Some("cherry-picking")
+    } else if gitdir.join("REVERT_HEAD").is_file() {
+        Some("reverting")
+    } else if gitdir.join("BISECT_LOG").is_file() {
+        Some("bisecting")
+    } else {
+        None
+    }
+}
+
+/// The directory holding this worktree's `HEAD`: `.git` itself, or the
+/// gitdir a worktree's `.git` file points at, walking up from `dir`.
+fn git_head_dir(dir: &Path) -> Option<std::path::PathBuf> {
     let mut current = Some(dir);
     while let Some(candidate) = current {
         let dotgit = candidate.join(".git");
         if dotgit.is_dir() {
-            return branch_from_head(&dotgit.join("HEAD"));
+            return Some(dotgit);
         }
         if dotgit.is_file() {
             let contents = std::fs::read_to_string(&dotgit).ok()?;
             let gitdir = contents.strip_prefix("gitdir:")?.trim();
-            return branch_from_head(&candidate.join(gitdir).join("HEAD"));
+            return Some(candidate.join(gitdir));
         }
         current = candidate.parent();
     }
@@ -413,7 +484,7 @@ pub fn segment_texts(
                 Module::Model => payload
                     .model_display_name()
                     .map(|name| format_model(name, mode)),
-                Module::Context => Some(format_tokens(payload.current_tokens())),
+                Module::Context => Some(format_tokens(payload.current_tokens(), columns)),
                 Module::Cost => payload.total_cost_usd().map(format_cost),
                 Module::Usage => format_usage(
                     UsageWindow {
@@ -434,11 +505,16 @@ pub fn segment_texts(
         .collect()
 }
 
-/// Branch plus the session's line churn: ` main +156 -23`. Lines come from
-/// the payload (what Claude changed), not from a git diff.
+/// Branch, any in-progress repo operation, then the session's line churn:
+/// ` main (merging) +156 -23`. Lines come from the payload (what Claude
+/// changed), not from a git diff.
 fn git_segment(payload: &Payload, mode: Mode) -> Option<String> {
-    let branch = git_branch(Path::new(payload.dir()?))?;
+    let dir = Path::new(payload.dir()?);
+    let branch = git_branch(dir)?;
     let mut text = format!("{} {branch}", branch_icon(mode));
+    if let Some(state) = git_state(dir) {
+        let _ = write!(text, " ({state})");
+    }
     if let (Some(added), Some(removed)) = (payload.lines_added(), payload.lines_removed()) {
         let _ = write!(text, " +{added} -{removed}");
     }
