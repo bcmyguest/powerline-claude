@@ -4,18 +4,24 @@ name: release
 # the conventional commits since the last tag, the workflow pushes that
 # vX.Y.Z tag, builds the static musl binary, publishes a GitHub release
 # with git-cliff release notes, and pushes the crate to crates.io via Trusted
-# Publishing (OIDC; skipped quietly until this repo/workflow is registered as
-# a trusted publisher for the crate on crates.io). If nothing releasable
-# landed (only unconventional or chore(release) commits), the bumped version
-# equals the latest tag and the run exits early.
+# Publishing (OIDC; the crate on crates.io must list this repo + release.yml
+# as a trusted publisher, or the publish step fails the run). If nothing
+# releasable landed (only unconventional or chore(release) commits), the
+# bumped version equals the latest tag and the run exits early.
 #
-# The crate version in Cargo.toml stays at its committed value; the binary is
-# stamped with the tag version at build time so `powerline-claude --version`
-# reports the released version.
+# Manual runs (workflow_dispatch) skip the release half and only (re)publish
+# the latest existing tag to crates.io — e.g. to backfill a version whose
+# crates.io publish failed. Publishing is idempotent: if the version is
+# already on crates.io the run exits early.
+#
+# The crate version in Cargo.toml stays at its committed value; the binary
+# and the published crate are stamped with the tag version at build time so
+# `powerline-claude --version` reports the released version.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -34,45 +40,91 @@ jobs:
           fetch-depth: 0
 
       - name: Install git-cliff
+        if: github.event_name == 'push'
         uses: taiki-e/install-action@v2
         with:
           tool: git-cliff
 
-      - name: Compute next version
+      # Sets three outputs: `version` (the vX.Y.Z being built), `release`
+      # (tag + GitHub release wanted, i.e. a push with releasable commits),
+      # and `skip` (nothing to do at all).
+      - name: Compute version
         id: bump
         run: |
-          next="$(git cliff --bumped-version)"
           latest="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-          echo "next=$next" >> "$GITHUB_OUTPUT"
-          if [ "$next" = "$latest" ]; then
-            echo "Nothing to release: bumped version $next equals the latest tag."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Releasing $next (previous: ${latest:-none})."
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -z "$latest" ]; then
+              echo "No tags exist yet; nothing to publish."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Republishing latest tag $latest to crates.io."
+            echo "version=$latest" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            next="$(git cliff --bumped-version)"
+            echo "version=$next" >> "$GITHUB_OUTPUT"
+            if [ "$next" = "$latest" ]; then
+              echo "Nothing to release: bumped version $next equals the latest tag."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Releasing $next (previous: ${latest:-none})."
+              echo "release=true" >> "$GITHUB_OUTPUT"
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
-      - name: Render release notes
+      # crates.io returns 200 for a published version and 404 otherwise.
+      # Only manual reruns can hit an already-published version; push runs
+      # always carry a strictly newer one.
+      - name: Check crates.io for this version
+        id: published
         if: steps.bump.outputs.skip == 'false'
         run: |
-          git cliff --unreleased --tag "${{ steps.bump.outputs.next }}" -o release-notes.md
+          version="${{ steps.bump.outputs.version }}"
+          status="$(curl -s -o /dev/null -w '%{http_code}' \
+            -A 'powerline-claude release workflow (https://github.com/${{ github.repository }})' \
+            "https://crates.io/api/v1/crates/powerline-claude/${version#v}")"
+          if [ "$status" = "200" ]; then
+            echo "$version is already on crates.io."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Manual runs publish the tagged code, not whatever main has moved to.
+      - name: Check out the tag
+        if: steps.bump.outputs.release == 'false' && steps.bump.outputs.skip == 'false'
+        run: git checkout "refs/tags/${{ steps.bump.outputs.version }}"
+
+      - name: Render release notes
+        if: steps.bump.outputs.release == 'true'
+        run: |
+          git cliff --unreleased --tag "${{ steps.bump.outputs.version }}" -o release-notes.md
           cat release-notes.md
 
       - name: Install musl target
-        if: steps.bump.outputs.skip == 'false'
+        if: steps.bump.outputs.release == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
 
       - name: Test
-        if: steps.bump.outputs.skip == 'false'
+        if: steps.bump.outputs.release == 'true'
         run: cargo test --locked
 
-      - name: Build static binary
+      # After Test, which runs --locked and would reject the stale Cargo.lock
+      # this edit leaves behind (cargo publish regenerates it).
+      - name: Stamp crate version
         if: steps.bump.outputs.skip == 'false'
         run: |
-          version="${{ steps.bump.outputs.next }}"
+          version="${{ steps.bump.outputs.version }}"
           sed -i "s/^version = \".*\"/version = \"${version#v}\"/" Cargo.toml
+
+      - name: Build static binary
+        if: steps.bump.outputs.release == 'true'
+        run: |
           cargo build --release --target x86_64-unknown-linux-musl
           mkdir -p release
           cp target/x86_64-unknown-linux-musl/release/powerline-claude \
@@ -82,33 +134,33 @@ jobs:
           ls -l
 
       - name: Push tag
-        if: steps.bump.outputs.skip == 'false'
+        if: steps.bump.outputs.release == 'true'
         run: |
-          git tag "${{ steps.bump.outputs.next }}"
-          git push origin "${{ steps.bump.outputs.next }}"
+          git tag "${{ steps.bump.outputs.version }}"
+          git push origin "${{ steps.bump.outputs.version }}"
 
       - name: Publish release
-        if: steps.bump.outputs.skip == 'false'
+        if: steps.bump.outputs.release == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.bump.outputs.next }}
+          tag_name: ${{ steps.bump.outputs.version }}
           body_path: release-notes.md
           files: release/*
 
       # Exchanges the run's OIDC identity for a short-lived crates.io token
-      # (Trusted Publishing — no long-lived secret). continue-on-error keeps
-      # the release green until the repo is registered as a trusted publisher
-      # for the crate on crates.io.
+      # (Trusted Publishing — no long-lived secret). Fails the run if the
+      # crate doesn't list this repo/workflow as a trusted publisher; the tag
+      # and GitHub release above have already landed by then, so recover by
+      # registering the publisher and re-running via workflow_dispatch.
       - name: Authenticate with crates.io
         id: crates-auth
-        if: steps.bump.outputs.skip == 'false'
-        continue-on-error: true
+        if: steps.bump.outputs.skip == 'false' && steps.published.outputs.already == 'false'
         uses: rust-lang/crates-io-auth-action@v1
 
       # Publishes the crate with the same stamped version as the tag.
       # --allow-dirty because the version stamp above edits Cargo.toml in place.
       - name: Publish to crates.io
-        if: steps.bump.outputs.skip == 'false' && steps.crates-auth.outcome == 'success'
+        if: steps.bump.outputs.skip == 'false' && steps.published.outputs.already == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: cargo publish --allow-dirty
