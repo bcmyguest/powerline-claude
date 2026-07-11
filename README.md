@@ -167,6 +167,8 @@ When the bar is wider than the terminal, the least important segments are
 dropped until it fits (at least one always survives). Drop order: `logo`,
 `stats`, `effort`, `cost`, `usage`, `model`, `git`, `dir`, `context`.
 
+![the bar shedding segments as the terminal narrows](docs/small-screens.png)
+
 The OSC 9;4 progress bar mirrors context usage: green below 40%, yellow to
 60%, red above, full at the 80% compact threshold.
 
