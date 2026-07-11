@@ -141,9 +141,11 @@ built-in palettes.
   before the first API call; turns orange at 80k tokens and red at 125k
   (the `context_warn`/`context_alert` theme families)
 - `cost` — session cost, `$X.XX`
-- `usage` — remaining subscription rate-limit budget (`5h 77% · 7d 59%`:
-  what's left of the rolling 5-hour and 7-day windows); hidden when the
-  payload has no rate-limit data
+- `usage` — remaining subscription rate-limit budget (`5h 77% (2h) · 7d 59% (5d)`:
+  what's left of the rolling 5-hour and 7-day windows and how long until each
+  resets); hidden when the payload has no rate-limit data; turns orange when
+  the tightest window drops under 20% remaining and red under 5% (the same
+  `context_warn`/`context_alert` theme families the context segment uses)
 - `stats` — session duration (`1h 12m`)
 - `effort` — reasoning effort level; hidden when the model doesn't support it
 

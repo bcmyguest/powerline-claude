@@ -66,6 +66,23 @@ fn parses_context_window_size() {
 }
 
 #[test]
+fn parses_rate_limit_windows() {
+    let p = full();
+    assert_eq!(p.five_hour_used(), Some(23.5));
+    assert_eq!(p.seven_day_used(), Some(41.2));
+    assert_eq!(p.five_hour_resets_at(), Some(1738425600));
+    assert_eq!(p.seven_day_resets_at(), Some(1738857600));
+}
+
+#[test]
+fn rate_limit_fields_are_none_when_absent() {
+    let p = minimal();
+    assert_eq!(p.five_hour_used(), None);
+    assert_eq!(p.five_hour_resets_at(), None);
+    assert_eq!(p.seven_day_resets_at(), None);
+}
+
+#[test]
 fn empty_object_parses_with_all_none() {
     let p = Payload::from_json("{}").unwrap();
     assert_eq!(p.model_display_name(), None);

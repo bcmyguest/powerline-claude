@@ -25,6 +25,9 @@ pub struct Env {
     pub home: String,
     /// Raw `$COLUMNS` value (set by Claude Code v2.1.153+).
     pub columns: Option<String>,
+    /// Wall clock as Unix seconds, for the usage segment's reset countdowns.
+    /// `None` (as in tests) simply omits them.
+    pub now: Option<i64>,
 }
 
 impl Env {
@@ -32,6 +35,10 @@ impl Env {
         Self {
             home: std::env::var("HOME").unwrap_or_default(),
             columns: std::env::var("COLUMNS").ok(),
+            now: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|since_epoch| since_epoch.as_secs() as i64),
         }
     }
 }
@@ -60,11 +67,11 @@ pub fn run(
     let width = resolve_width(cli.width, env.columns.as_deref(), tty_width);
 
     let build = |modules: &[segments::Module]| -> Vec<Segment> {
-        segments::segment_texts(&payload, modules, width, &env.home, mode)
+        segments::segment_texts(&payload, modules, width, &env.home, mode, env.now)
             .into_iter()
             .map(|(module, text)| Segment {
                 text,
-                colors: module.colors(&theme, payload.current_tokens()),
+                colors: module.colors(&theme, &payload),
             })
             .collect()
     };

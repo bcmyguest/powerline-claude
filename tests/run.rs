@@ -13,6 +13,7 @@ fn env() -> Env {
     Env {
         home: "/home/user".to_string(),
         columns: None,
+        now: None,
     }
 }
 
@@ -165,6 +166,40 @@ fn usage_renders_remaining_rate_limit_budget() {
 }
 
 #[test]
+fn usage_shows_reset_countdowns_when_the_clock_is_known() {
+    // fixture resets_at: five_hour 1738425600, seven_day 1738857600
+    let clocked = Env {
+        home: "/home/user".to_string(),
+        columns: None,
+        now: Some(1_738_418_400), // 2h before the 5h reset, ~5d before the 7d one
+    };
+    let out = run(
+        include_str!("fixtures/full.json"),
+        &cli(&["--modules", "usage", "--mode", "flat"]),
+        &clocked,
+        || None,
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " 5h 77% (2h) · 7d 59% (5d) ");
+}
+
+#[test]
+fn usage_under_20_percent_remaining_gets_the_warn_background() {
+    let payload = r#"{"rate_limits":{"five_hour":{"used_percentage":85.0}}}"#;
+    let out = run_fixture(payload, &["--modules", "usage", "--mode", "flat"]).unwrap();
+    // catppuccin-mocha context_warn bg: #fab387
+    assert!(out.bar.contains("\x1b[48;2;250;179;135m"), "{:?}", out.bar);
+}
+
+#[test]
+fn usage_under_5_percent_remaining_gets_the_alert_background() {
+    let payload = r#"{"rate_limits":{"seven_day":{"used_percentage":96.0}}}"#;
+    let out = run_fixture(payload, &["--modules", "usage", "--mode", "flat"]).unwrap();
+    // catppuccin-mocha context_alert bg: #f38ba8
+    assert!(out.bar.contains("\x1b[48;2;243;139;168m"), "{:?}", out.bar);
+}
+
+#[test]
 fn modules_flag_selects_and_orders_segments() {
     let out = run_fixture(
         include_str!("fixtures/full.json"),
@@ -183,6 +218,7 @@ fn bare_theme_name_resolves_from_the_home_config_directory() {
     let env = Env {
         home: home.path().to_str().unwrap().to_string(),
         columns: None,
+        now: None,
     };
     let out = run(
         include_str!("fixtures/full.json"),
@@ -278,6 +314,7 @@ fn columns_env_drives_dir_truncation_through_run() {
     let narrow = Env {
         home: "/home/user".to_string(),
         columns: Some("79".to_string()),
+        now: None,
     };
     let out = run(
         include_str!("fixtures/full.json"),
