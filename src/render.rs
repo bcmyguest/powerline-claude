@@ -26,6 +26,9 @@ pub enum Mode {
 }
 
 impl Mode {
+    /// CLI names for `--mode`, in documentation order.
+    pub const NAMES: [&'static str; 3] = ["patched", "compatible", "flat"];
+
     fn separators(self) -> Option<Separators> {
         match self {
             Mode::Patched => Some(Separators {
@@ -52,7 +55,8 @@ impl FromStr for Mode {
             "compatible" => Ok(Mode::Compatible),
             "flat" => Ok(Mode::Flat),
             other => Err(format!(
-                "unknown mode '{other}', available: patched, compatible, flat"
+                "unknown mode '{other}', available: {}",
+                Mode::NAMES.join(", ")
             )),
         }
     }
