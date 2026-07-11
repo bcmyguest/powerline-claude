@@ -1,4 +1,4 @@
-use powerline_claude::theme::{Rgb, SegmentColors, SegmentKind, Theme};
+use powerline_claude::theme::{Family, Rgb, SegmentColors, Theme};
 
 fn write_theme_yaml(dir: &std::path::Path, contents: &str) {
     std::fs::write(dir.join("theme.yaml"), contents).unwrap();
@@ -37,29 +37,26 @@ fn unknown_theme_error_lists_available_names() {
 
 #[test]
 fn mocha_cost_colors_match_vendored_palette() {
-    let colors = Theme::default().colors(SegmentKind::Cost);
+    let colors = Theme::default().family(Family::Cost);
     assert_eq!(colors.fg, Rgb::hex(0xa6e3a1));
     assert_eq!(colors.bg, Rgb::hex(0x45475a));
 }
 
 #[test]
 fn mocha_git_uses_branch_fg_on_git_bg() {
-    let colors = Theme::default().colors(SegmentKind::Git);
+    let colors = Theme::default().family(Family::Git);
     assert_eq!(colors.fg, Rgb::hex(0xeba0ac));
     assert_eq!(colors.bg, Rgb::hex(0x313244));
 }
 
 #[test]
-fn stats_and_effort_reuse_palette_families() {
-    let theme = Theme::default();
-    // stats: cost fg on the context bg (keeps the alternating-bg rhythm)
-    let stats = theme.colors(SegmentKind::Stats);
-    assert_eq!(stats.fg, Rgb::hex(0xa6e3a1));
-    assert_eq!(stats.bg, Rgb::hex(0x313244));
-    // effort: model colors
-    let effort = theme.colors(SegmentKind::Effort);
-    assert_eq!(effort.fg, Rgb::hex(0xb4befe));
-    assert_eq!(effort.bg, Rgb::hex(0x1e1e2e));
+fn every_family_resolves_in_every_builtin() {
+    for name in Theme::builtin_names() {
+        let theme = Theme::by_name(name).unwrap();
+        for family in Family::ALL {
+            let _ = theme.family(family); // no panic on any slot
+        }
+    }
 }
 
 #[test]
@@ -111,14 +108,14 @@ cost: { fg: "#bbbbbb", bg: "#cccccc" }
     let theme = Theme::by_name(dir.path().to_str().unwrap()).unwrap();
 
     assert_eq!(
-        theme.colors(SegmentKind::Logo),
+        theme.family(Family::Claude),
         SegmentColors {
             fg: Rgb::hex(0x111111),
             bg: Rgb::hex(0x222222)
         }
     );
     assert_eq!(
-        theme.colors(SegmentKind::Cost),
+        theme.family(Family::Cost),
         SegmentColors {
             fg: Rgb::hex(0xbbbbbb),
             bg: Rgb::hex(0xcccccc)
@@ -137,20 +134,14 @@ fn custom_theme_dir_partial_family_falls_back_to_mocha() {
     let mocha = Theme::default();
 
     assert_eq!(
-        theme.colors(SegmentKind::Logo),
+        theme.family(Family::Claude),
         SegmentColors {
             fg: Rgb::hex(0x123456),
-            bg: mocha.colors(SegmentKind::Logo).bg,
+            bg: mocha.family(Family::Claude).bg,
         }
     );
-    assert_eq!(
-        theme.colors(SegmentKind::Git),
-        mocha.colors(SegmentKind::Git)
-    );
-    assert_eq!(
-        theme.colors(SegmentKind::Cost),
-        mocha.colors(SegmentKind::Cost)
-    );
+    assert_eq!(theme.family(Family::Git), mocha.family(Family::Git));
+    assert_eq!(theme.family(Family::Cost), mocha.family(Family::Cost));
 }
 
 #[test]

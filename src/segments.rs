@@ -1,15 +1,17 @@
 //! Segment content: what each module renders, given the payload.
 //!
-//! Everything here is pure string building except `git_branch`, which reads
-//! `.git/HEAD` from disk (never a subprocess — the statusline runs on every
-//! render and must stay cheap).
+//! `MODULES` is the registry — the one table that defines every module's CLI
+//! name, default position, and palette families. Everything here is pure
+//! string building except `git_branch`, which reads `.git/HEAD` from disk
+//! (never a subprocess — the statusline runs on every render and must stay
+//! cheap).
 
 use std::fmt::Write;
 use std::path::Path;
 use std::str::FromStr;
 
 use crate::payload::Payload;
-use crate::theme::SegmentKind;
+use crate::theme::{Family, SegmentColors, Theme};
 
 const LOGO: &str = "\u{f4f5}";
 const HAIKU_ICON: char = '\u{ee0d}';
@@ -32,56 +34,123 @@ pub enum Module {
     Effort,
 }
 
+/// One registry row: everything the rest of the program needs to know about
+/// a module besides how to format its text.
+struct ModuleSpec {
+    module: Module,
+    /// CLI name, as it appears in `--modules`.
+    name: &'static str,
+    /// Which palette family paints the foreground / background. Most modules
+    /// use one family for both; stats and effort have no family of their own
+    /// and borrow: stats paints the cost fg on the context bg (keeping the
+    /// alternating-bg rhythm), effort paints as model.
+    fg: Family,
+    bg: Family,
+}
+
+/// The module registry. Table order is the default bar order; adding a
+/// module means adding a row here plus a formatting arm in `segment_texts`.
+const MODULES: &[ModuleSpec] = &[
+    ModuleSpec {
+        module: Module::Logo,
+        name: "logo",
+        fg: Family::Claude,
+        bg: Family::Claude,
+    },
+    ModuleSpec {
+        module: Module::Dir,
+        name: "dir",
+        fg: Family::Directory,
+        bg: Family::Directory,
+    },
+    ModuleSpec {
+        module: Module::Git,
+        name: "git",
+        fg: Family::Git,
+        bg: Family::Git,
+    },
+    ModuleSpec {
+        module: Module::Model,
+        name: "model",
+        fg: Family::Model,
+        bg: Family::Model,
+    },
+    ModuleSpec {
+        module: Module::Context,
+        name: "context",
+        fg: Family::Context,
+        bg: Family::Context,
+    },
+    ModuleSpec {
+        module: Module::Cost,
+        name: "cost",
+        fg: Family::Cost,
+        bg: Family::Cost,
+    },
+    ModuleSpec {
+        module: Module::Stats,
+        name: "stats",
+        fg: Family::Cost,
+        bg: Family::Context,
+    },
+    ModuleSpec {
+        module: Module::Effort,
+        name: "effort",
+        fg: Family::Model,
+        bg: Family::Model,
+    },
+];
+
 impl Module {
-    pub fn default_order() -> Vec<Module> {
-        vec![
-            Module::Logo,
-            Module::Dir,
-            Module::Git,
-            Module::Model,
-            Module::Context,
-            Module::Cost,
-            Module::Stats,
-            Module::Effort,
-        ]
+    fn spec(self) -> &'static ModuleSpec {
+        MODULES
+            .iter()
+            .find(|spec| spec.module == self)
+            .expect("every Module variant has a registry row")
     }
 
-    pub fn kind(self) -> SegmentKind {
-        match self {
-            Module::Logo => SegmentKind::Logo,
-            Module::Dir => SegmentKind::Dir,
-            Module::Git => SegmentKind::Git,
-            Module::Model => SegmentKind::Model,
-            Module::Context => SegmentKind::Context,
-            Module::Cost => SegmentKind::Cost,
-            Module::Stats => SegmentKind::Stats,
-            Module::Effort => SegmentKind::Effort,
+    /// CLI name, as accepted by `--modules`.
+    pub fn name(self) -> &'static str {
+        self.spec().name
+    }
+
+    /// All module names, in default bar order.
+    pub fn names() -> impl Iterator<Item = &'static str> {
+        MODULES.iter().map(|spec| spec.name)
+    }
+
+    /// This module's colors under `theme`, per its registry families.
+    pub fn colors(self, theme: &Theme) -> SegmentColors {
+        let spec = self.spec();
+        SegmentColors {
+            fg: theme.family(spec.fg).fg,
+            bg: theme.family(spec.bg).bg,
         }
     }
 
-    const NAMES: &[(&str, Module)] = &[
-        ("logo", Module::Logo),
-        ("dir", Module::Dir),
-        ("git", Module::Git),
-        ("model", Module::Model),
-        ("context", Module::Context),
-        ("cost", Module::Cost),
-        ("stats", Module::Stats),
-        ("effort", Module::Effort),
-    ];
+    pub fn default_order() -> Vec<Module> {
+        MODULES.iter().map(|spec| spec.module).collect()
+    }
+
+    /// The default `--modules` value: every module, in registry order.
+    pub fn default_list() -> String {
+        Self::names().collect::<Vec<_>>().join(",")
+    }
 }
 
 impl FromStr for Module {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Module::NAMES
+        MODULES
             .iter()
-            .find(|(name, _)| *name == s)
-            .map(|(_, module)| *module)
+            .find(|spec| spec.name == s)
+            .map(|spec| spec.module)
             .ok_or_else(|| {
-                let available: Vec<&str> = Module::NAMES.iter().map(|(n, _)| *n).collect();
-                format!("unknown module '{s}', available: {}", available.join(", "))
+                format!(
+                    "unknown module '{s}', available: {}",
+                    Module::default_list().replace(',', ", ")
+                )
             })
     }
 }
@@ -187,19 +256,21 @@ fn branch_from_head(head_path: &Path) -> Option<String> {
 }
 
 /// Build the text for every requested module, skipping modules whose data is
-/// absent from the payload. Returns `(kind, text)` pairs ready for theming.
+/// absent from the payload. Returns `(module, text)` pairs ready for theming.
+/// `home` comes from the caller (see `Env`) so nothing here reads the
+/// process environment.
 pub fn segment_texts(
     payload: &Payload,
     modules: &[Module],
     columns: usize,
-) -> Vec<(SegmentKind, String)> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    home: &str,
+) -> Vec<(Module, String)> {
     modules
         .iter()
         .filter_map(|module| {
             let text = match module {
                 Module::Logo => Some(LOGO.to_string()),
-                Module::Dir => payload.dir().map(|dir| truncate_dir(dir, &home, columns)),
+                Module::Dir => payload.dir().map(|dir| truncate_dir(dir, home, columns)),
                 Module::Git => git_segment(payload),
                 Module::Model => payload.model_display_name().map(format_model),
                 Module::Context => Some(format_tokens(payload.current_tokens())),
@@ -207,7 +278,7 @@ pub fn segment_texts(
                 Module::Stats => payload.total_duration_ms().map(format_duration),
                 Module::Effort => payload.effort_level().map(str::to_string),
             };
-            text.map(|text| (module.kind(), text))
+            text.map(|text| (*module, text))
         })
         .collect()
 }

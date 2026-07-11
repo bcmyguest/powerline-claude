@@ -1,10 +1,9 @@
 //! Color themes, ported from the starship-claude palette files.
 //!
 //! A palette defines fg/bg pairs per semantic family (claude, directory, git,
-//! model, context, cost). The two segments that have no upstream family
-//! (stats, effort) reuse existing families so every theme stays coherent:
-//! stats renders with the cost fg on the context bg, effort with the model
-//! colors.
+//! model, context, cost). Which family paints which segment is the segment
+//! registry's business (`segments::MODULES`) — this module only resolves
+//! `Family` to colors.
 //!
 //! A custom theme is a directory containing a `theme.yaml` with any subset
 //! of the six families below (each an optional `fg`/`bg` hex pair); anything
@@ -50,85 +49,112 @@ pub struct SegmentColors {
     pub bg: Rgb,
 }
 
+/// One semantic color family: what a palette (and a custom `theme.yaml`)
+/// actually defines. Segments pick their fg and bg from these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SegmentKind {
-    Logo,
-    Dir,
+pub enum Family {
+    Claude,
+    Directory,
     Git,
     Model,
     Context,
     Cost,
-    Stats,
-    Effort,
+}
+
+impl Family {
+    pub const ALL: [Family; 6] = [
+        Family::Claude,
+        Family::Directory,
+        Family::Git,
+        Family::Model,
+        Family::Context,
+        Family::Cost,
+    ];
+}
+
+/// Const constructor for palette entries: `(fg, bg)` as hex words.
+const fn sc(fg: u32, bg: u32) -> SegmentColors {
+    SegmentColors {
+        fg: Rgb::hex(fg),
+        bg: Rgb::hex(bg),
+    }
 }
 
 /// One vendored palette: the semantic fg/bg values from the upstream
-/// `palettes/*.toml` files.
+/// `palettes/*.toml` files, indexed by `Family` (same order as `Family::ALL`:
+/// claude, directory, git, model, context, cost).
 #[derive(Debug)]
 struct Palette {
     name: &'static str,
-    claude: (u32, u32),
-    directory: (u32, u32),
-    git: (u32, u32),
-    model: (u32, u32),
-    context: (u32, u32),
-    cost: (u32, u32),
+    colors: [SegmentColors; Family::ALL.len()],
 }
 
 const PALETTES: &[Palette] = &[
     Palette {
         name: "catppuccin-mocha",
-        claude: (0xd97757, 0x313244),
-        directory: (0x89dceb, 0x1e1e2e),
-        git: (0xeba0ac, 0x313244),
-        model: (0xb4befe, 0x1e1e2e),
-        context: (0xfab387, 0x313244),
-        cost: (0xa6e3a1, 0x45475a),
+        colors: [
+            sc(0xd97757, 0x313244), // claude
+            sc(0x89dceb, 0x1e1e2e), // directory
+            sc(0xeba0ac, 0x313244), // git
+            sc(0xb4befe, 0x1e1e2e), // model
+            sc(0xfab387, 0x313244), // context
+            sc(0xa6e3a1, 0x45475a), // cost
+        ],
     },
     Palette {
         name: "catppuccin-frappe",
-        claude: (0xd97757, 0xeff1f5),
-        directory: (0x04a5e5, 0xeff1f5),
-        git: (0xdd7878, 0xccd0da),
-        model: (0x8839ef, 0xeff1f5),
-        context: (0xdf8e1d, 0xccd0da),
-        cost: (0x40a02b, 0xbcc0cc),
+        colors: [
+            sc(0xd97757, 0xeff1f5),
+            sc(0x04a5e5, 0xeff1f5),
+            sc(0xdd7878, 0xccd0da),
+            sc(0x8839ef, 0xeff1f5),
+            sc(0xdf8e1d, 0xccd0da),
+            sc(0x40a02b, 0xbcc0cc),
+        ],
     },
     Palette {
         name: "dracula",
-        claude: (0xd97757, 0x44475a),
-        directory: (0x8be9fd, 0x282a36),
-        git: (0xbd93f9, 0x44475a),
-        model: (0x8be9fd, 0x282a36),
-        context: (0xffb86c, 0x44475a),
-        cost: (0x50fa7b, 0x4d4f68),
+        colors: [
+            sc(0xd97757, 0x44475a),
+            sc(0x8be9fd, 0x282a36),
+            sc(0xbd93f9, 0x44475a),
+            sc(0x8be9fd, 0x282a36),
+            sc(0xffb86c, 0x44475a),
+            sc(0x50fa7b, 0x4d4f68),
+        ],
     },
     Palette {
         name: "gruvbox-dark",
-        claude: (0xd97757, 0x282828),
-        directory: (0x83a598, 0x282828),
-        git: (0xb16286, 0x3c3836),
-        model: (0x458588, 0x282828),
-        context: (0xd79921, 0x3c3836),
-        cost: (0x689d6a, 0x504945),
+        colors: [
+            sc(0xd97757, 0x282828),
+            sc(0x83a598, 0x282828),
+            sc(0xb16286, 0x3c3836),
+            sc(0x458588, 0x282828),
+            sc(0xd79921, 0x3c3836),
+            sc(0x689d6a, 0x504945),
+        ],
     },
     Palette {
         name: "nord",
-        claude: (0xd97757, 0x2e3440),
-        directory: (0x88c0d0, 0x2e3440),
-        git: (0xb48ead, 0x3b4252),
-        model: (0x5e81ac, 0x2e3440),
-        context: (0x8fbcbb, 0x3b4252),
-        cost: (0xa3be8c, 0x434c5e),
+        colors: [
+            sc(0xd97757, 0x2e3440),
+            sc(0x88c0d0, 0x2e3440),
+            sc(0xb48ead, 0x3b4252),
+            sc(0x5e81ac, 0x2e3440),
+            sc(0x8fbcbb, 0x3b4252),
+            sc(0xa3be8c, 0x434c5e),
+        ],
     },
     Palette {
         name: "tokyonight",
-        claude: (0x090c0c, 0xa3aed2),
-        directory: (0xe3e5e5, 0x769ff0),
-        git: (0x769ff0, 0x394260),
-        model: (0x769ff0, 0x212736),
-        context: (0xa0a9cb, 0x1d2230),
-        cost: (0xc0caf5, 0x414868),
+        colors: [
+            sc(0x090c0c, 0xa3aed2),
+            sc(0xe3e5e5, 0x769ff0),
+            sc(0x769ff0, 0x394260),
+            sc(0x769ff0, 0x212736),
+            sc(0xa0a9cb, 0x1d2230),
+            sc(0xc0caf5, 0x414868),
+        ],
     },
 ];
 
@@ -138,6 +164,8 @@ struct RawFamily {
     bg: Option<String>,
 }
 
+/// The serde adapter facing `theme.yaml`: the one place the six family
+/// names are deliberately spelled out, because they are the file format.
 #[derive(Debug, Deserialize, Default)]
 struct RawTheme {
     name: Option<String>,
@@ -149,17 +177,25 @@ struct RawTheme {
     cost: Option<RawFamily>,
 }
 
+impl RawTheme {
+    fn take_family(&mut self, family: Family) -> Option<RawFamily> {
+        match family {
+            Family::Claude => self.claude.take(),
+            Family::Directory => self.directory.take(),
+            Family::Git => self.git.take(),
+            Family::Model => self.model.take(),
+            Family::Context => self.context.take(),
+            Family::Cost => self.cost.take(),
+        }
+    }
+}
+
 /// A fully resolved theme: owned so it can come from either a vendored
 /// preset or a loaded custom `theme.yaml`.
 #[derive(Debug, Clone)]
 pub struct Theme {
     name: String,
-    claude: SegmentColors,
-    directory: SegmentColors,
-    git: SegmentColors,
-    model: SegmentColors,
-    context: SegmentColors,
-    cost: SegmentColors,
+    colors: [SegmentColors; Family::ALL.len()],
 }
 
 impl Default for Theme {
@@ -170,18 +206,9 @@ impl Default for Theme {
 
 impl Theme {
     fn from_preset(preset: &Palette) -> Self {
-        let colors = |pair: (u32, u32)| SegmentColors {
-            fg: Rgb::hex(pair.0),
-            bg: Rgb::hex(pair.1),
-        };
         Self {
             name: preset.name.to_string(),
-            claude: colors(preset.claude),
-            directory: colors(preset.directory),
-            git: colors(preset.git),
-            model: colors(preset.model),
-            context: colors(preset.context),
-            cost: colors(preset.cost),
+            colors: preset.colors,
         }
     }
 
@@ -195,7 +222,7 @@ impl Theme {
             .find(|palette| palette.name == name)
             .map(Self::from_preset)
             .ok_or_else(|| {
-                let available: Vec<&str> = PALETTES.iter().map(|p| p.name).collect();
+                let available: Vec<&str> = Self::builtin_names().collect();
                 format!(
                     "unknown theme '{name}', available: {}",
                     available.join(", ")
@@ -203,28 +230,29 @@ impl Theme {
             })
     }
 
+    /// Names of the vendored palettes, in listing order.
+    pub fn builtin_names() -> impl Iterator<Item = &'static str> {
+        PALETTES.iter().map(|palette| palette.name)
+    }
+
     fn from_dir(dir: &Path) -> Result<Self, String> {
         let yaml_path = dir.join("theme.yaml");
         let contents = std::fs::read_to_string(&yaml_path)
             .map_err(|e| format!("failed to read '{}': {e}", yaml_path.display()))?;
-        let raw: RawTheme = serde_norway::from_str(&contents)
+        let mut raw: RawTheme = serde_norway::from_str(&contents)
             .map_err(|e| format!("failed to parse '{}': {e}", yaml_path.display()))?;
 
-        let defaults = &PALETTES[0];
-        let resolve =
-            |default: (u32, u32), family: Option<RawFamily>| -> Result<SegmentColors, String> {
-                let (default_fg, default_bg) = default;
-                let family = family.unwrap_or_default();
-                let fg = match family.fg {
-                    Some(s) => Rgb::parse_hex(&s)?,
-                    None => Rgb::hex(default_fg),
-                };
-                let bg = match family.bg {
-                    Some(s) => Rgb::parse_hex(&s)?,
-                    None => Rgb::hex(default_bg),
-                };
-                Ok(SegmentColors { fg, bg })
-            };
+        let mut colors = PALETTES[0].colors;
+        for family in Family::ALL {
+            let overrides = raw.take_family(family).unwrap_or_default();
+            let slot = &mut colors[family as usize];
+            if let Some(fg) = overrides.fg {
+                slot.fg = Rgb::parse_hex(&fg)?;
+            }
+            if let Some(bg) = overrides.bg {
+                slot.bg = Rgb::parse_hex(&bg)?;
+            }
+        }
 
         let name = raw.name.unwrap_or_else(|| {
             dir.file_name()
@@ -232,34 +260,15 @@ impl Theme {
                 .unwrap_or_else(|| "custom".to_string())
         });
 
-        Ok(Self {
-            name,
-            claude: resolve(defaults.claude, raw.claude)?,
-            directory: resolve(defaults.directory, raw.directory)?,
-            git: resolve(defaults.git, raw.git)?,
-            model: resolve(defaults.model, raw.model)?,
-            context: resolve(defaults.context, raw.context)?,
-            cost: resolve(defaults.cost, raw.cost)?,
-        })
+        Ok(Self { name, colors })
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn colors(&self, kind: SegmentKind) -> SegmentColors {
-        match kind {
-            SegmentKind::Logo => self.claude,
-            SegmentKind::Dir => self.directory,
-            SegmentKind::Git => self.git,
-            SegmentKind::Model => self.model,
-            SegmentKind::Context => self.context,
-            SegmentKind::Cost => self.cost,
-            SegmentKind::Stats => SegmentColors {
-                fg: self.cost.fg,
-                bg: self.context.bg,
-            },
-            SegmentKind::Effort => self.model,
-        }
+    /// The resolved fg/bg pair for one family.
+    pub fn family(&self, family: Family) -> SegmentColors {
+        self.colors[family as usize]
     }
 }
