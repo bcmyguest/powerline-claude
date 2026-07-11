@@ -47,7 +47,9 @@ Steps:
      logo,dir,git,model,context,cost,usage,stats,effort
    - `--modules-right`: same values, pinned to the right edge of the terminal
      (default: none — everything renders on the left)
-   - `--mode`: patched (nerd font), compatible (plain Unicode), flat
+   - `--mode`: patched (nerd font), compatible (plain-Unicode separators
+     and segment icons, for terminals without a patched font), flat (no
+     separators)
    - `--no-progress`: disable the terminal progress bar
 4. To preview a candidate configuration, pipe a sample payload through the
    binary and show the raw output (the user's terminal renders the ANSI):

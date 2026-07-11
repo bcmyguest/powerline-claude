@@ -60,7 +60,7 @@ pub fn run(
     let width = resolve_width(cli.width, env.columns.as_deref(), tty_width);
 
     let build = |modules: &[segments::Module]| -> Vec<Segment> {
-        segments::segment_texts(&payload, modules, width, &env.home)
+        segments::segment_texts(&payload, modules, width, &env.home, mode)
             .into_iter()
             .map(|(module, text)| Segment {
                 text,

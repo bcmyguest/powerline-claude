@@ -11,6 +11,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::payload::Payload;
+use crate::render::Mode;
 use crate::theme::{Family, SegmentColors, Theme};
 
 const LOGO: &str = "\u{f4f5}";
@@ -18,6 +19,26 @@ const HAIKU_ICON: char = '\u{ee0d}';
 const SONNET_ICON: char = '\u{f06a9}';
 const OPUS_ICON: char = '\u{f16a6}';
 const BRANCH_ICON: char = '\u{e0a0}';
+
+// Compatible mode promises a bar that renders without a patched font, so the
+// nerd-font glyphs above get plain-Unicode stand-ins (and the model segment
+// simply drops its icon).
+const LOGO_COMPAT: &str = "\u{2733}"; // ✳
+const BRANCH_ICON_COMPAT: char = '\u{2387}'; // ⎇
+
+fn logo(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Compatible => LOGO_COMPAT,
+        _ => LOGO,
+    }
+}
+
+fn branch_icon(mode: Mode) -> char {
+    match mode {
+        Mode::Compatible => BRANCH_ICON_COMPAT,
+        _ => BRANCH_ICON,
+    }
+}
 
 /// Terminals narrower than this get a more aggressive dir truncation.
 const NARROW_COLUMNS: usize = 80;
@@ -186,8 +207,11 @@ pub fn parse_modules(list: &str) -> Result<Vec<Module>, String> {
         .collect()
 }
 
-pub fn format_model(display_name: &str) -> String {
+pub fn format_model(display_name: &str, mode: Mode) -> String {
     let name = display_name.to_lowercase();
+    if mode == Mode::Compatible {
+        return name;
+    }
     let icon = if name.contains("haiku") {
         HAIKU_ICON
     } else if name.contains("opus") {
@@ -317,15 +341,18 @@ pub fn segment_texts(
     modules: &[Module],
     columns: usize,
     home: &str,
+    mode: Mode,
 ) -> Vec<(Module, String)> {
     modules
         .iter()
         .filter_map(|module| {
             let text = match module {
-                Module::Logo => Some(LOGO.to_string()),
+                Module::Logo => Some(logo(mode).to_string()),
                 Module::Dir => payload.dir().map(|dir| truncate_dir(dir, home, columns)),
-                Module::Git => git_segment(payload),
-                Module::Model => payload.model_display_name().map(format_model),
+                Module::Git => git_segment(payload, mode),
+                Module::Model => payload
+                    .model_display_name()
+                    .map(|name| format_model(name, mode)),
                 Module::Context => Some(format_tokens(payload.current_tokens())),
                 Module::Cost => payload.total_cost_usd().map(format_cost),
                 Module::Usage => format_usage(payload.five_hour_used(), payload.seven_day_used()),
@@ -339,9 +366,9 @@ pub fn segment_texts(
 
 /// Branch plus the session's line churn: ` main +156 -23`. Lines come from
 /// the payload (what Claude changed), not from a git diff.
-fn git_segment(payload: &Payload) -> Option<String> {
+fn git_segment(payload: &Payload, mode: Mode) -> Option<String> {
     let branch = git_branch(Path::new(payload.dir()?))?;
-    let mut text = format!("{BRANCH_ICON} {branch}");
+    let mut text = format!("{} {branch}", branch_icon(mode));
     if let (Some(added), Some(removed)) = (payload.lines_added(), payload.lines_removed()) {
         let _ = write!(text, " +{added} -{removed}");
     }

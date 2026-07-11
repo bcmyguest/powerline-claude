@@ -76,7 +76,7 @@ Flags go on that command string:
 | `--modules` | `logo,dir,git,model,context,cost,usage,stats,effort` | Segments to render, in order |
 | `--modules-right` | (empty) | Segments pinned to the right edge of the terminal, e.g. `--modules-right context,cost` |
 | `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, or a path to a [custom theme directory](#custom-themes) |
-| `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain Unicode), `flat` (none) |
+| `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain-Unicode separators and segment icons — no patched font needed), `flat` (no separators) |
 | `--no-progress` | off | Suppress the OSC 9;4 terminal progress bar |
 | `--width` | `$COLUMNS`, then parent TTY, then 200 | Terminal width (drives dir truncation) |
 
@@ -120,11 +120,12 @@ built-in palettes.
 
 ## Segments
 
-- `logo` — Claude glyph
+- `logo` — Claude glyph (`✳` in compatible mode)
 - `dir` — workspace dir, last two path components (one below 80 columns)
 - `git` — current branch (read from `.git/HEAD`, worktree-aware) plus the
-  session's `+added -removed` line counts from the payload
-- `model` — nerd icon + lowercased model name
+  session's `+added -removed` line counts from the payload (`⎇` branch
+  icon in compatible mode)
+- `model` — nerd icon + lowercased model name (no icon in compatible mode)
 - `context` — exact tokens in the context window (`150,697 tok`), `~~ tok`
   before the first API call; turns orange at 80k tokens and red at 125k
   (the `context_warn`/`context_alert` theme families)

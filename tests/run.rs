@@ -79,6 +79,25 @@ fn full_payload_renders_every_data_backed_segment() {
 }
 
 #[test]
+fn compatible_mode_renders_without_nerd_font_glyphs() {
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &["--mode", "compatible", "--width", "200"],
+    )
+    .unwrap();
+    let visible = strip_ansi(&out.bar);
+    assert!(
+        !visible
+            .chars()
+            .any(|c| ('\u{e000}'..='\u{f8ff}').contains(&c)
+                || ('\u{f0000}'..='\u{10ffff}').contains(&c)),
+        "no private-use glyphs in compatible mode: {visible:?}"
+    );
+    assert!(visible.contains("\u{2733}"), "plain logo: {visible:?}");
+    assert!(visible.contains("opus 4.8"), "{visible:?}");
+}
+
+#[test]
 fn modules_right_pads_the_bar_to_the_terminal_width() {
     let out = run_fixture(
         include_str!("fixtures/full.json"),

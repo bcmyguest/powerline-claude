@@ -1,6 +1,7 @@
 use std::fs;
 
 use powerline_claude::payload::Payload;
+use powerline_claude::render::Mode;
 use powerline_claude::segments::{
     Module, context_family, format_cost, format_duration, format_model, format_tokens,
     format_usage, git_branch, parse_modules, segment_texts, truncate_dir,
@@ -50,14 +51,34 @@ fn default_list_is_the_cli_default() {
 
 #[test]
 fn model_gets_family_icon_and_lowercase_name() {
-    assert_eq!(format_model("Opus 4.8"), "\u{f16a6} opus 4.8");
-    assert_eq!(format_model("Sonnet 5"), "\u{f06a9} sonnet 5");
-    assert_eq!(format_model("Haiku 4.5"), "\u{ee0d} haiku 4.5");
+    assert_eq!(
+        format_model("Opus 4.8", Mode::Patched),
+        "\u{f16a6} opus 4.8"
+    );
+    assert_eq!(
+        format_model("Sonnet 5", Mode::Patched),
+        "\u{f06a9} sonnet 5"
+    );
+    assert_eq!(
+        format_model("Haiku 4.5", Mode::Patched),
+        "\u{ee0d} haiku 4.5"
+    );
 }
 
 #[test]
 fn unknown_model_family_falls_back_to_sonnet_icon() {
-    assert_eq!(format_model("Fable 5"), "\u{f06a9} fable 5");
+    assert_eq!(format_model("Fable 5", Mode::Patched), "\u{f06a9} fable 5");
+}
+
+#[test]
+fn compatible_mode_drops_the_model_icon() {
+    assert_eq!(format_model("Opus 4.8", Mode::Compatible), "opus 4.8");
+}
+
+#[test]
+fn flat_mode_keeps_the_nerd_model_icon() {
+    // flat only removes separators; icons stay nerd-font
+    assert_eq!(format_model("Opus 4.8", Mode::Flat), "\u{f16a6} opus 4.8");
 }
 
 // --- context tokens ---
@@ -278,10 +299,33 @@ fn git_segment_appends_churn_when_both_line_counts_exist() {
              "cost": {{"total_lines_added": 5, "total_lines_removed": 2}}}}"#,
         repo.path().display()
     ));
-    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user");
+    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user", Mode::Patched);
     assert_eq!(
         texts,
         vec![(Module::Git, "\u{e0a0} main +5 -2".to_string())]
+    );
+}
+
+#[test]
+fn compatible_mode_swaps_the_logo_and_branch_icons() {
+    let repo = tempdir_repo("main");
+    let p = payload(&format!(
+        r#"{{"workspace": {{"current_dir": "{}"}}}}"#,
+        repo.path().display()
+    ));
+    let texts = segment_texts(
+        &p,
+        &[Module::Logo, Module::Git],
+        200,
+        "/home/user",
+        Mode::Compatible,
+    );
+    assert_eq!(
+        texts,
+        vec![
+            (Module::Logo, "\u{2733}".to_string()),
+            (Module::Git, "\u{2387} main".to_string()),
+        ]
     );
 }
 
@@ -293,7 +337,7 @@ fn git_segment_omits_churn_when_a_line_count_is_missing() {
              "cost": {{"total_lines_added": 5}}}}"#,
         repo.path().display()
     ));
-    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user");
+    let texts = segment_texts(&p, &[Module::Git], 200, "/home/user", Mode::Patched);
     assert_eq!(texts, vec![(Module::Git, "\u{e0a0} main".to_string())]);
 }
 
@@ -302,7 +346,13 @@ fn each_optional_segment_drops_when_its_data_is_absent() {
     // model only: dir, git, cost, stats, and effort must all drop; logo
     // always renders and context shows its placeholder.
     let p = payload(r#"{"model": {"display_name": "Sonnet 5"}}"#);
-    let texts = segment_texts(&p, &Module::default_order(), 200, "/home/user");
+    let texts = segment_texts(
+        &p,
+        &Module::default_order(),
+        200,
+        "/home/user",
+        Mode::Patched,
+    );
     let modules: Vec<Module> = texts.iter().map(|(module, _)| *module).collect();
     assert_eq!(modules, vec![Module::Logo, Module::Model, Module::Context]);
 }
@@ -316,6 +366,7 @@ fn segments_skip_absent_data() {
         &Module::default_order(),
         200,
         "/home/user",
+        Mode::Patched,
     );
     let joined: Vec<&str> = texts.iter().map(|(_, t)| t.as_str()).collect();
     assert!(joined.iter().any(|t| t.contains("sonnet 5")), "{joined:?}");
