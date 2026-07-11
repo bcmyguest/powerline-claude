@@ -55,16 +55,33 @@ pub fn run(
     let payload = Payload::from_json(payload_json).map_err(|e| format!("bad payload: {e}"))?;
     let theme = theme::Theme::by_name(&cli.theme)?;
     let modules = segments::parse_modules(&cli.modules)?;
+    let modules_right = segments::parse_modules(&cli.modules_right)?;
     let mode: render::Mode = cli.mode.parse()?;
     let width = resolve_width(cli.width, env.columns.as_deref(), tty_width);
 
-    let segments: Vec<Segment> = segments::segment_texts(&payload, &modules, width, &env.home)
-        .into_iter()
-        .map(|(module, text)| Segment {
-            text,
-            colors: module.colors(&theme),
-        })
-        .collect();
+    let build = |modules: &[segments::Module]| -> Vec<Segment> {
+        segments::segment_texts(&payload, modules, width, &env.home)
+            .into_iter()
+            .map(|(module, text)| Segment {
+                text,
+                colors: module.colors(&theme, payload.current_tokens()),
+            })
+            .collect()
+    };
+
+    let left_bar = render::render(&build(&modules), mode);
+    let right_segments = build(&modules_right);
+    let bar = if right_segments.is_empty() {
+        left_bar
+    } else {
+        // Pad the gap so the right bar ends at the terminal edge; when the
+        // two sides don't fit, keep at least one space between them and let
+        // the terminal do what it will.
+        let right_bar = render::render_right(&right_segments, mode);
+        let used = render::visible_width(&left_bar) + render::visible_width(&right_bar);
+        let gap = width.saturating_sub(used).max(1);
+        format!("{left_bar}{}{right_bar}", " ".repeat(gap))
+    };
 
     let progress = if cli.no_progress {
         None
@@ -72,10 +89,7 @@ pub fn run(
         context_percent(&payload).map(progress::osc_sequence)
     };
 
-    Ok(Output {
-        bar: render::render(&segments, mode),
-        progress,
-    })
+    Ok(Output { bar, progress })
 }
 
 /// Terminal width precedence: explicit flag, then `$COLUMNS`, then the

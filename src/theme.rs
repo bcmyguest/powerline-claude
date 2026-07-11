@@ -1,13 +1,14 @@
 //! Color themes, ported from the starship-claude palette files.
 //!
 //! A palette defines fg/bg pairs per semantic family (claude, directory, git,
-//! model, context, cost). Which family paints which segment is the segment
-//! registry's business (`segments::MODULES`) — this module only resolves
-//! `Family` to colors.
+//! model, context, context_warn, context_alert, cost). Which family paints
+//! which segment is the segment registry's business (`segments::MODULES`) —
+//! this module only resolves `Family` to colors.
 //!
 //! A custom theme is a directory containing a `theme.yaml` with any subset
-//! of the six families below (each an optional `fg`/`bg` hex pair); anything
-//! left unspecified falls back to the catppuccin-mocha value for that slot.
+//! of the eight families below (each an optional `fg`/`bg` hex pair);
+//! anything left unspecified falls back to the catppuccin-mocha value for
+//! that slot.
 
 use std::path::Path;
 
@@ -58,16 +59,22 @@ pub enum Family {
     Git,
     Model,
     Context,
+    /// Context past the warning token threshold: orange background.
+    ContextWarn,
+    /// Context past the alert token threshold: red background.
+    ContextAlert,
     Cost,
 }
 
 impl Family {
-    pub const ALL: [Family; 6] = [
+    pub const ALL: [Family; 8] = [
         Family::Claude,
         Family::Directory,
         Family::Git,
         Family::Model,
         Family::Context,
+        Family::ContextWarn,
+        Family::ContextAlert,
         Family::Cost,
     ];
 }
@@ -82,7 +89,8 @@ const fn sc(fg: u32, bg: u32) -> SegmentColors {
 
 /// One vendored palette: the semantic fg/bg values from the upstream
 /// `palettes/*.toml` files, indexed by `Family` (same order as `Family::ALL`:
-/// claude, directory, git, model, context, cost).
+/// claude, directory, git, model, context, context_warn, context_alert,
+/// cost).
 #[derive(Debug)]
 struct Palette {
     name: &'static str,
@@ -98,6 +106,8 @@ const PALETTES: &[Palette] = &[
             sc(0xeba0ac, 0x313244), // git
             sc(0xb4befe, 0x1e1e2e), // model
             sc(0xfab387, 0x313244), // context
+            sc(0x11111b, 0xfab387), // context_warn
+            sc(0x11111b, 0xf38ba8), // context_alert
             sc(0xa6e3a1, 0x45475a), // cost
         ],
     },
@@ -109,6 +119,8 @@ const PALETTES: &[Palette] = &[
             sc(0xdd7878, 0xccd0da),
             sc(0x8839ef, 0xeff1f5),
             sc(0xdf8e1d, 0xccd0da),
+            sc(0xeff1f5, 0xfe640b),
+            sc(0xeff1f5, 0xd20f39),
             sc(0x40a02b, 0xbcc0cc),
         ],
     },
@@ -120,6 +132,8 @@ const PALETTES: &[Palette] = &[
             sc(0xbd93f9, 0x44475a),
             sc(0x8be9fd, 0x282a36),
             sc(0xffb86c, 0x44475a),
+            sc(0x282a36, 0xffb86c),
+            sc(0x282a36, 0xff5555),
             sc(0x50fa7b, 0x4d4f68),
         ],
     },
@@ -131,6 +145,8 @@ const PALETTES: &[Palette] = &[
             sc(0xb16286, 0x3c3836),
             sc(0x458588, 0x282828),
             sc(0xd79921, 0x3c3836),
+            sc(0x282828, 0xfe8019),
+            sc(0x282828, 0xfb4934),
             sc(0x689d6a, 0x504945),
         ],
     },
@@ -142,6 +158,8 @@ const PALETTES: &[Palette] = &[
             sc(0xb48ead, 0x3b4252),
             sc(0x5e81ac, 0x2e3440),
             sc(0x8fbcbb, 0x3b4252),
+            sc(0x2e3440, 0xd08770),
+            sc(0xeceff4, 0xbf616a),
             sc(0xa3be8c, 0x434c5e),
         ],
     },
@@ -153,6 +171,8 @@ const PALETTES: &[Palette] = &[
             sc(0x769ff0, 0x394260),
             sc(0x769ff0, 0x212736),
             sc(0xa0a9cb, 0x1d2230),
+            sc(0x1d2230, 0xff9e64),
+            sc(0x1d2230, 0xf7768e),
             sc(0xc0caf5, 0x414868),
         ],
     },
@@ -164,7 +184,7 @@ struct RawFamily {
     bg: Option<String>,
 }
 
-/// The serde adapter facing `theme.yaml`: the one place the six family
+/// The serde adapter facing `theme.yaml`: the one place the eight family
 /// names are deliberately spelled out, because they are the file format.
 #[derive(Debug, Deserialize, Default)]
 struct RawTheme {
@@ -174,6 +194,8 @@ struct RawTheme {
     git: Option<RawFamily>,
     model: Option<RawFamily>,
     context: Option<RawFamily>,
+    context_warn: Option<RawFamily>,
+    context_alert: Option<RawFamily>,
     cost: Option<RawFamily>,
 }
 
@@ -185,6 +207,8 @@ impl RawTheme {
             Family::Git => self.git.take(),
             Family::Model => self.model.take(),
             Family::Context => self.context.take(),
+            Family::ContextWarn => self.context_warn.take(),
+            Family::ContextAlert => self.context_alert.take(),
             Family::Cost => self.cost.take(),
         }
     }

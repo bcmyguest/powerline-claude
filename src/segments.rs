@@ -22,6 +22,10 @@ const BRANCH_ICON: char = '\u{e0a0}';
 /// Terminals narrower than this get a more aggressive dir truncation.
 const NARROW_COLUMNS: usize = 80;
 
+/// Context tokens at which the context segment turns orange, then red.
+pub const CONTEXT_WARN_TOKENS: u64 = 80_000;
+pub const CONTEXT_ALERT_TOKENS: u64 = 125_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Module {
     Logo,
@@ -30,6 +34,7 @@ pub enum Module {
     Model,
     Context,
     Cost,
+    Usage,
     Stats,
     Effort,
 }
@@ -41,9 +46,11 @@ struct ModuleSpec {
     /// CLI name, as it appears in `--modules`.
     name: &'static str,
     /// Which palette family paints the foreground / background. Most modules
-    /// use one family for both; stats and effort have no family of their own
-    /// and borrow: stats paints the cost fg on the context bg (keeping the
-    /// alternating-bg rhythm), effort paints as model.
+    /// use one family for both; stats, effort, and usage have no family of
+    /// their own and borrow: stats paints the cost fg on the context bg
+    /// (keeping the alternating-bg rhythm), effort paints as model, usage as
+    /// cost. Context's row is its calm state — past the token thresholds it
+    /// swaps to the warn/alert families (see `Module::colors`).
     fg: Family,
     bg: Family,
 }
@@ -88,6 +95,12 @@ const MODULES: &[ModuleSpec] = &[
         bg: Family::Cost,
     },
     ModuleSpec {
+        module: Module::Usage,
+        name: "usage",
+        fg: Family::Cost,
+        bg: Family::Cost,
+    },
+    ModuleSpec {
         module: Module::Stats,
         name: "stats",
         fg: Family::Cost,
@@ -120,11 +133,21 @@ impl Module {
     }
 
     /// This module's colors under `theme`, per its registry families.
-    pub fn colors(self, theme: &Theme) -> SegmentColors {
+    /// Context is the one payload-dependent module: past the token
+    /// thresholds it paints with the warn/alert families instead of its
+    /// registry row, which is why the current token count comes along.
+    pub fn colors(self, theme: &Theme, context_tokens: Option<u64>) -> SegmentColors {
         let spec = self.spec();
+        let (fg, bg) = match self {
+            Module::Context => {
+                let family = context_family(context_tokens);
+                (family, family)
+            }
+            _ => (spec.fg, spec.bg),
+        };
         SegmentColors {
-            fg: theme.family(spec.fg).fg,
-            bg: theme.family(spec.bg).bg,
+            fg: theme.family(fg).fg,
+            bg: theme.family(bg).bg,
         }
     }
 
@@ -196,6 +219,36 @@ fn group_thousands(value: u64) -> String {
 
 pub fn format_cost(usd: f64) -> String {
     format!("${usd:.2}")
+}
+
+/// Which family paints the context segment at this token count: normal
+/// below the warn threshold, orange from 80k, red from 125k.
+pub fn context_family(tokens: Option<u64>) -> Family {
+    match tokens {
+        Some(count) if count >= CONTEXT_ALERT_TOKENS => Family::ContextAlert,
+        Some(count) if count >= CONTEXT_WARN_TOKENS => Family::ContextWarn,
+        _ => Family::Context,
+    }
+}
+
+/// Remaining subscription rate-limit budget, from the used percentages the
+/// payload reports per window: `5h 77% · 7d 59%`. Windows absent from the
+/// payload are dropped; no windows at all means no segment.
+pub fn format_usage(five_hour_used: Option<f64>, seven_day_used: Option<f64>) -> Option<String> {
+    let remaining =
+        |used: Option<f64>| used.map(|percent| (100.0 - percent).clamp(0.0, 100.0).round());
+    let parts: Vec<String> = [
+        ("5h", remaining(five_hour_used)),
+        ("7d", remaining(seven_day_used)),
+    ]
+    .into_iter()
+    .filter_map(|(label, left)| left.map(|left| format!("{label} {left:.0}%")))
+    .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
 }
 
 pub fn format_duration(ms: u64) -> String {
@@ -275,6 +328,7 @@ pub fn segment_texts(
                 Module::Model => payload.model_display_name().map(format_model),
                 Module::Context => Some(format_tokens(payload.current_tokens())),
                 Module::Cost => payload.total_cost_usd().map(format_cost),
+                Module::Usage => format_usage(payload.five_hour_used(), payload.seven_day_used()),
                 Module::Stats => payload.total_duration_ms().map(format_duration),
                 Module::Effort => payload.effort_level().map(str::to_string),
             };

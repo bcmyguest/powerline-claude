@@ -60,6 +60,36 @@ fn every_family_resolves_in_every_builtin() {
 }
 
 #[test]
+fn mocha_context_warn_and_alert_match_vendored_palette() {
+    let theme = Theme::default();
+    let warn = theme.family(Family::ContextWarn);
+    assert_eq!(warn.fg, Rgb::hex(0x11111b));
+    assert_eq!(warn.bg, Rgb::hex(0xfab387));
+    let alert = theme.family(Family::ContextAlert);
+    assert_eq!(alert.fg, Rgb::hex(0x11111b));
+    assert_eq!(alert.bg, Rgb::hex(0xf38ba8));
+}
+
+#[test]
+fn custom_theme_can_override_the_threshold_families() {
+    let dir = tempfile::tempdir().unwrap();
+    write_theme_yaml(
+        dir.path(),
+        "context_alert: { bg: \"#ff0000\" }\ncontext_warn: { fg: \"#123456\" }\n",
+    );
+
+    let theme = Theme::by_name(dir.path().to_str().unwrap()).unwrap();
+    let mocha = Theme::default();
+
+    let alert = theme.family(Family::ContextAlert);
+    assert_eq!(alert.bg, Rgb::hex(0xff0000));
+    assert_eq!(alert.fg, mocha.family(Family::ContextAlert).fg);
+    let warn = theme.family(Family::ContextWarn);
+    assert_eq!(warn.fg, Rgb::hex(0x123456));
+    assert_eq!(warn.bg, mocha.family(Family::ContextWarn).bg);
+}
+
+#[test]
 fn rgb_decomposes_into_channels() {
     let rgb = Rgb::hex(0xd97757);
     assert_eq!((rgb.r, rgb.g, rgb.b), (0xd9, 0x77, 0x57));
