@@ -272,13 +272,21 @@ pub fn format_tokens(tokens: Option<u64>, columns: usize) -> String {
 /// `15.5k` / `1.2M`-style count for narrow terminals, one decimal with a
 /// trailing `.0` trimmed.
 fn compact_number(value: u64) -> String {
-    let (scaled, unit) = if value >= 1_000_000 {
+    let (mut scaled, mut unit) = if value >= 1_000_000 {
         (value as f64 / 1_000_000.0, "M")
     } else if value >= 1_000 {
         (value as f64 / 1_000.0, "k")
     } else {
         return value.to_string();
     };
+
+    // Round first; if rounding would yield `1000k`, promote to `M`.
+    scaled = (scaled * 10.0).round() / 10.0;
+    if unit == "k" && scaled >= 1000.0 {
+        scaled = (scaled / 1000.0 * 10.0).round() / 10.0;
+        unit = "M";
+    }
+
     let text = format!("{scaled:.1}");
     let trimmed = text.strip_suffix(".0").unwrap_or(&text);
     format!("{trimmed}{unit}")
