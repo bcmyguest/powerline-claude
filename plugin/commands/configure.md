@@ -43,7 +43,10 @@ Steps:
 3. Ask what they want to change (unless $ARGUMENTS already says), offering:
    - `--theme`: catppuccin-mocha (default), catppuccin-frappe, dracula,
      gruvbox-dark, nord, tokyonight
-   - `--modules`: any order/subset of logo,dir,git,model,context,cost,stats,effort
+   - `--modules`: any order/subset of
+     logo,dir,git,model,context,cost,usage,stats,effort
+   - `--modules-right`: same values, pinned to the right edge of the terminal
+     (default: none — everything renders on the left)
    - `--mode`: patched (nerd font), compatible (plain Unicode), flat
    - `--no-progress`: disable the terminal progress bar
 4. To preview a candidate configuration, pipe a sample payload through the

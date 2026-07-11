@@ -54,7 +54,11 @@ fn strip_ansi(s: &str) -> String {
 #[test]
 fn cli_defaults_match_the_documented_interface() {
     let cli = cli(&[]);
-    assert_eq!(cli.modules, "logo,dir,git,model,context,cost,stats,effort");
+    assert_eq!(
+        cli.modules,
+        "logo,dir,git,model,context,cost,usage,stats,effort"
+    );
+    assert_eq!(cli.modules_right, "");
     assert_eq!(cli.theme, "catppuccin-mocha");
     assert_eq!(cli.mode, "patched");
     assert!(!cli.no_progress);
@@ -70,8 +74,75 @@ fn full_payload_renders_every_data_backed_segment() {
     assert_eq!(
         visible,
         "░▒▓ \u{f4f5} \u{e0b0} apps/emissions \u{e0b1} \u{f16a6} opus 4.8 \u{e0b0} \
-         15,500 tok \u{e0b0} $0.71 \u{e0b0} 1h 12m \u{e0b0} high \u{e0b0}"
+         15,500 tok \u{e0b0} $0.71 \u{e0b1} 5h 77% · 7d 59% \u{e0b0} 1h 12m \u{e0b0} high \u{e0b0}"
     );
+}
+
+#[test]
+fn modules_right_pads_the_bar_to_the_terminal_width() {
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &[
+            "--modules",
+            "logo",
+            "--modules-right",
+            "model",
+            "--mode",
+            "flat",
+            "--width",
+            "40",
+        ],
+    )
+    .unwrap();
+    let visible = strip_ansi(&out.bar);
+    assert_eq!(visible.chars().count(), 40, "{visible:?}");
+    assert!(visible.starts_with(" \u{f4f5} "), "{visible:?}");
+    assert!(visible.ends_with(" \u{f16a6} opus 4.8 "), "{visible:?}");
+}
+
+#[test]
+fn modules_right_keeps_one_space_when_the_bar_overflows() {
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &[
+            "--modules",
+            "logo",
+            "--modules-right",
+            "model",
+            "--mode",
+            "flat",
+            "--width",
+            "5",
+        ],
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " \u{f4f5}   \u{f16a6} opus 4.8 ");
+}
+
+#[test]
+fn context_over_80k_tokens_gets_the_warn_background() {
+    let payload = r#"{"context_window":{"total_input_tokens":90000}}"#;
+    let out = run_fixture(payload, &["--modules", "context", "--mode", "flat"]).unwrap();
+    // catppuccin-mocha context_warn bg: #fab387
+    assert!(out.bar.contains("\x1b[48;2;250;179;135m"), "{:?}", out.bar);
+}
+
+#[test]
+fn context_over_125k_tokens_gets_the_alert_background() {
+    let payload = r#"{"context_window":{"total_input_tokens":130000}}"#;
+    let out = run_fixture(payload, &["--modules", "context", "--mode", "flat"]).unwrap();
+    // catppuccin-mocha context_alert bg: #f38ba8
+    assert!(out.bar.contains("\x1b[48;2;243;139;168m"), "{:?}", out.bar);
+}
+
+#[test]
+fn usage_renders_remaining_rate_limit_budget() {
+    let out = run_fixture(
+        include_str!("fixtures/full.json"),
+        &["--modules", "usage", "--mode", "flat"],
+    )
+    .unwrap();
+    assert_eq!(strip_ansi(&out.bar), " 5h 77% · 7d 59% ");
 }
 
 #[test]

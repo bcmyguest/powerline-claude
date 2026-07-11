@@ -73,7 +73,8 @@ Flags go on that command string:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--modules` | `logo,dir,git,model,context,cost,stats,effort` | Segments to render, in order |
+| `--modules` | `logo,dir,git,model,context,cost,usage,stats,effort` | Segments to render, in order |
+| `--modules-right` | (empty) | Segments pinned to the right edge of the terminal, e.g. `--modules-right context,cost` |
 | `--theme` | `catppuccin-mocha` | Also: `catppuccin-frappe`, `dracula`, `gruvbox-dark`, `nord`, `tokyonight`, or a path to a [custom theme directory](#custom-themes) |
 | `--mode` | `patched` | `patched` (nerd-font separators), `compatible` (plain Unicode), `flat` (none) |
 | `--no-progress` | off | Suppress the OSC 9;4 terminal progress bar |
@@ -90,9 +91,10 @@ powerline-claude --theme ~/.config/powerline-claude/themes/my-theme
 # reads ~/.config/powerline-claude/themes/my-theme/theme.yaml
 ```
 
-`theme.yaml` defines fg/bg hex colors for the six segment families
-(`claude`, `directory`, `git`, `model`, `context`, `cost`) plus an optional
-display `name`. [`docs/themes/synthwave`](docs/themes/synthwave/theme.yaml)
+`theme.yaml` defines fg/bg hex colors for the eight segment families
+(`claude`, `directory`, `git`, `model`, `context`, `context_warn`,
+`context_alert`, `cost`) plus an optional display `name`.
+[`docs/themes/synthwave`](docs/themes/synthwave/theme.yaml)
 is a complete example you can copy as a starting point:
 
 ```yaml
@@ -102,6 +104,8 @@ directory: { fg: "#36f9f6", bg: "#241b2f" }
 git: { fg: "#ff8b39", bg: "#2a2139" }
 model: { fg: "#b893ce", bg: "#241b2f" }
 context: { fg: "#fede5d", bg: "#2a2139" }
+context_warn: { fg: "#241b2f", bg: "#ff8b39" }
+context_alert: { fg: "#241b2f", bg: "#fe4450" }
 cost: { fg: "#72f1b8", bg: "#34294f" }
 ```
 
@@ -110,8 +114,9 @@ cost: { fg: "#72f1b8", bg: "#34294f" }
 Every field is optional, right down to individual `fg`/`bg` values within a
 family — anything left unspecified falls back to the corresponding
 catppuccin-mocha color. `name` defaults to the directory's basename if
-omitted. `stats` and `effort` aren't configurable directly; they derive from
-`cost`/`context` and `model` respectively, same as the built-in palettes.
+omitted. `stats`, `effort`, and `usage` aren't configurable directly; they
+derive from `cost`/`context`, `model`, and `cost` respectively, same as the
+built-in palettes.
 
 ## Segments
 
@@ -121,8 +126,12 @@ omitted. `stats` and `effort` aren't configurable directly; they derive from
   session's `+added -removed` line counts from the payload
 - `model` — nerd icon + lowercased model name
 - `context` — exact tokens in the context window (`150,697 tok`), `~~ tok`
-  before the first API call
+  before the first API call; turns orange at 80k tokens and red at 125k
+  (the `context_warn`/`context_alert` theme families)
 - `cost` — session cost, `$X.XX`
+- `usage` — remaining subscription rate-limit budget (`5h 77% · 7d 59%`:
+  what's left of the rolling 5-hour and 7-day windows); hidden when the
+  payload has no rate-limit data
 - `stats` — session duration (`1h 12m`)
 - `effort` — reasoning effort level; hidden when the model doesn't support it
 

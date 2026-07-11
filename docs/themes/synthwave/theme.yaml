@@ -6,4 +6,6 @@ directory: { fg: "#36f9f6", bg: "#241b2f" }
 git: { fg: "#ff8b39", bg: "#2a2139" }
 model: { fg: "#b893ce", bg: "#241b2f" }
 context: { fg: "#fede5d", bg: "#2a2139" }
+context_warn: { fg: "#241b2f", bg: "#ff8b39" }
+context_alert: { fg: "#241b2f", bg: "#fe4450" }
 cost: { fg: "#72f1b8", bg: "#34294f" }

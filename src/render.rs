@@ -8,11 +8,15 @@ use crate::theme::{Rgb, SegmentColors};
 const RESET: &str = "\x1b[0m";
 
 /// Separator glyphs for one rendering mode. `hard` bridges two different
-/// backgrounds, `thin` divides two segments sharing a background.
+/// backgrounds, `thin` divides two segments sharing a background. The
+/// `*_right` variants are the mirrored glyphs for a right-aligned bar.
 struct Separators {
     hard: &'static str,
     thin: &'static str,
     fade: &'static str,
+    hard_right: &'static str,
+    thin_right: &'static str,
+    fade_right: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,11 +39,17 @@ impl Mode {
                 hard: "\u{e0b0}",
                 thin: "\u{e0b1}",
                 fade: "░▒▓",
+                hard_right: "\u{e0b2}",
+                thin_right: "\u{e0b3}",
+                fade_right: "▓▒░",
             }),
             Mode::Compatible => Some(Separators {
                 hard: "▶",
                 thin: "❯",
                 fade: "░▒▓",
+                hard_right: "◀",
+                thin_right: "❮",
+                fade_right: "▓▒░",
             }),
             Mode::Flat => None,
         }
@@ -124,4 +134,84 @@ pub fn render(segments: &[Segment], mode: Mode) -> String {
         None => out.push_str(RESET),
     }
     out
+}
+
+/// Mirror of `render` for a right-aligned bar: opens with a left-pointing
+/// arrow on the default background, closes with the fade at the terminal's
+/// right edge.
+pub fn render_right(segments: &[Segment], mode: Mode) -> String {
+    let Some(first) = segments.first() else {
+        return String::new();
+    };
+    let separators = mode.separators();
+    let mut out = String::new();
+
+    if let Some(sep) = &separators {
+        let _ = write!(out, "{}{}", fg(first.colors.bg), sep.hard_right);
+    }
+
+    for (i, segment) in segments.iter().enumerate() {
+        if let (Some(sep), Some(previous)) = (&separators, i.checked_sub(1).map(|p| &segments[p])) {
+            if previous.colors.bg == segment.colors.bg {
+                let _ = write!(
+                    out,
+                    "{}{}{}",
+                    bg(segment.colors.bg),
+                    fg(segment.colors.fg),
+                    sep.thin_right
+                );
+            } else {
+                // mirrored: the triangle is filled with the bg of the segment
+                // to its right, over the bg of the segment to its left
+                let _ = write!(
+                    out,
+                    "{}{}{}",
+                    bg(previous.colors.bg),
+                    fg(segment.colors.bg),
+                    sep.hard_right
+                );
+            }
+        }
+        let _ = write!(
+            out,
+            "{}{} {} ",
+            bg(segment.colors.bg),
+            fg(segment.colors.fg),
+            segment.text
+        );
+    }
+
+    let last = segments.last().unwrap_or(first);
+    match &separators {
+        Some(sep) => {
+            let _ = write!(
+                out,
+                "{RESET}{}{}{RESET}",
+                fg(last.colors.bg),
+                sep.fade_right
+            );
+        }
+        None => out.push_str(RESET),
+    }
+    out
+}
+
+/// Columns the bar occupies on screen: characters outside SGR escape
+/// sequences (`ESC [ ... m`), each counted as one cell — true for every
+/// glyph this renderer emits.
+pub fn visible_width(rendered: &str) -> usize {
+    let mut count = 0;
+    let mut chars = rendered.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for c in chars.by_ref() {
+                if c == 'm' {
+                    break;
+                }
+            }
+        } else {
+            count += 1;
+        }
+    }
+    count
 }

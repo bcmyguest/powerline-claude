@@ -15,6 +15,10 @@ pub struct Cli {
     #[arg(long, default_value_t = Module::default_list())]
     pub modules: String,
 
+    /// Comma-separated segments pinned to the right edge of the terminal
+    #[arg(long, default_value = "")]
+    pub modules_right: String,
+
     /// Color theme
     #[arg(long, default_value = "catppuccin-mocha")]
     pub theme: String,

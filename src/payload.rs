@@ -14,6 +14,7 @@ pub struct Payload {
     cost: Option<Cost>,
     context_window: Option<ContextWindow>,
     effort: Option<Effort>,
+    rate_limits: Option<RateLimits>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +54,19 @@ struct CurrentUsage {
 #[derive(Debug, Deserialize)]
 struct Effort {
     level: Option<String>,
+}
+
+/// Subscription rate-limit windows (Pro/Max plans): how much of the rolling
+/// 5-hour and 7-day budgets the session's account has used.
+#[derive(Debug, Deserialize)]
+struct RateLimits {
+    five_hour: Option<RateLimitWindow>,
+    seven_day: Option<RateLimitWindow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RateLimitWindow {
+    used_percentage: Option<f64>,
 }
 
 impl Payload {
@@ -114,5 +128,23 @@ impl Payload {
 
     pub fn lines_removed(&self) -> Option<u64> {
         self.cost.as_ref()?.total_lines_removed
+    }
+
+    /// Used percentage of the rolling 5-hour rate-limit window.
+    pub fn five_hour_used(&self) -> Option<f64> {
+        self.rate_limits
+            .as_ref()?
+            .five_hour
+            .as_ref()?
+            .used_percentage
+    }
+
+    /// Used percentage of the rolling 7-day rate-limit window.
+    pub fn seven_day_used(&self) -> Option<f64> {
+        self.rate_limits
+            .as_ref()?
+            .seven_day
+            .as_ref()?
+            .used_percentage
     }
 }

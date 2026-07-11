@@ -2,31 +2,47 @@ use std::fs;
 
 use powerline_claude::payload::Payload;
 use powerline_claude::segments::{
-    Module, format_cost, format_duration, format_model, format_tokens, git_branch, parse_modules,
-    segment_texts, truncate_dir,
+    Module, context_family, format_cost, format_duration, format_model, format_tokens,
+    format_usage, git_branch, parse_modules, segment_texts, truncate_dir,
 };
-use powerline_claude::theme::{Rgb, Theme};
+use powerline_claude::theme::{Family, Rgb, Theme};
 
 // --- registry: colors ---
 
 #[test]
-fn stats_and_effort_borrow_palette_families() {
+fn stats_effort_and_usage_borrow_palette_families() {
     let theme = Theme::default(); // catppuccin-mocha
     // stats: cost fg on the context bg (keeps the alternating-bg rhythm)
-    let stats = Module::Stats.colors(&theme);
+    let stats = Module::Stats.colors(&theme, None);
     assert_eq!(stats.fg, Rgb::hex(0xa6e3a1));
     assert_eq!(stats.bg, Rgb::hex(0x313244));
     // effort: model colors
-    let effort = Module::Effort.colors(&theme);
+    let effort = Module::Effort.colors(&theme, None);
     assert_eq!(effort.fg, Rgb::hex(0xb4befe));
     assert_eq!(effort.bg, Rgb::hex(0x1e1e2e));
+    // usage: cost colors
+    assert_eq!(
+        Module::Usage.colors(&theme, None),
+        Module::Cost.colors(&theme, None)
+    );
+}
+
+#[test]
+fn context_colors_shift_with_the_token_count() {
+    let theme = Theme::default();
+    let calm = Module::Context.colors(&theme, Some(15_000));
+    assert_eq!(calm.bg, theme.family(Family::Context).bg);
+    let warn = Module::Context.colors(&theme, Some(90_000));
+    assert_eq!(warn.bg, theme.family(Family::ContextWarn).bg);
+    let alert = Module::Context.colors(&theme, Some(130_000));
+    assert_eq!(alert.bg, theme.family(Family::ContextAlert).bg);
 }
 
 #[test]
 fn default_list_is_the_cli_default() {
     assert_eq!(
         Module::default_list(),
-        "logo,dir,git,model,context,cost,stats,effort"
+        "logo,dir,git,model,context,cost,usage,stats,effort"
     );
 }
 
@@ -57,6 +73,39 @@ fn tokens_render_with_thousands_separators() {
 fn missing_or_zero_tokens_render_placeholder() {
     assert_eq!(format_tokens(None), "~~ tok");
     assert_eq!(format_tokens(Some(0)), "~~ tok");
+}
+
+// --- context thresholds ---
+
+#[test]
+fn context_turns_orange_at_80k_and_red_at_125k() {
+    assert_eq!(context_family(Some(79_999)), Family::Context);
+    assert_eq!(context_family(Some(80_000)), Family::ContextWarn);
+    assert_eq!(context_family(Some(124_999)), Family::ContextWarn);
+    assert_eq!(context_family(Some(125_000)), Family::ContextAlert);
+}
+
+#[test]
+fn missing_tokens_keep_the_normal_context_family() {
+    assert_eq!(context_family(None), Family::Context);
+}
+
+// --- rate-limit usage ---
+
+#[test]
+fn usage_shows_remaining_percentage_per_window() {
+    assert_eq!(
+        format_usage(Some(23.5), Some(41.2)),
+        Some("5h 77% · 7d 59%".to_string())
+    );
+    assert_eq!(format_usage(Some(23.5), None), Some("5h 77%".to_string()));
+    assert_eq!(format_usage(None, Some(99.9)), Some("7d 0%".to_string()));
+}
+
+#[test]
+fn usage_hides_without_rate_limit_data_and_never_goes_negative() {
+    assert_eq!(format_usage(None, None), None);
+    assert_eq!(format_usage(Some(120.0), None), Some("5h 0%".to_string()));
 }
 
 // --- cost ---
@@ -190,6 +239,7 @@ fn default_module_order_matches_todays_bar() {
             Module::Model,
             Module::Context,
             Module::Cost,
+            Module::Usage,
             Module::Stats,
             Module::Effort,
         ]
